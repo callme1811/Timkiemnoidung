@@ -52,7 +52,7 @@ def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
 # Load Markdown
 # ==========================
 @st.cache_data
-def load_markdown(file_path="demo_document.md"):
+def load_markdown(file_path="technova_ai_demo_data.md"):
     if not os.path.exists(file_path):
         st.error(f"❌ File {file_path} không tồn tại. Vui lòng kiểm tra đường dẫn.")
         return []
@@ -61,8 +61,7 @@ def load_markdown(file_path="demo_document.md"):
     nodes = parse_markdown_to_nodes(text)
     return flatten_tree(nodes)
 
-# Update file path nếu cần
-nodes = load_markdown(file_path="technova_ai_demo_data.md")  # hoặc demo_document.md
+nodes = load_markdown(file_path="technova_ai_demo_data.md")
 
 # ==========================
 # Streamlit UI
@@ -107,7 +106,7 @@ with col1:
             st.write(node['text'])
         
         # ==========================
-        # Ollama fallback
+        # Ollama integration
         # ==========================
         try:
             from ollama import OllamaClient
@@ -119,7 +118,7 @@ with col1:
             try:
                 client = OllamaClient(host="127.0.0.1", port=11434)
                 answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
-                st.subheader("📝 Câu trả lời")
+                st.subheader("📝 Câu trả lời tự động (Ollama)")
                 st.write(answer)
             except Exception as e:
                 st.error(f"[OLLAMA_ERROR] {e}")
