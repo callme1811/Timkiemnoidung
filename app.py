@@ -51,7 +51,7 @@ def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
 # Load Markdown
 # ==========================
 @st.cache_data
-def load_markdown(file_path="demo_document.md"):
+def load_markdown(file_path="/workspaces/Timkiemnoidung/technova_ai_demo_data.md"):
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
     nodes = parse_markdown_to_nodes(text)
