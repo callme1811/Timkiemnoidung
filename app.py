@@ -3,7 +3,7 @@ import re
 from typing import List, Dict
 
 # ==========================
-# Tách Markdown thành node theo heading
+# Chia Markdown thành node theo heading
 # ==========================
 def parse_markdown_to_nodes(md_text: str) -> List[Dict]:
     nodes = []
@@ -88,16 +88,20 @@ st.title("📊 PageIndex Intelligence Analyzer")
 
 col1, col2 = st.columns([2,1])
 
+# --------------------------
+# Cột nhập câu hỏi + trả lời Ollama
+# --------------------------
 with col1:
     query = st.text_input("Nhập câu hỏi của bạn về PageIndex:", placeholder="Ví dụ: Liệt kê các mục trong Deployment Options...")
     num_nodes = st.slider("Số node retrieval", 1, 10, 3)
+    
     if st.button("🚀 Bắt đầu phân tích") and query:
         st.subheader("📌 Node được chọn")
         for node in nodes[:num_nodes]:
             st.markdown(f"**{node['title']}**")
             st.write(node['text'])
 
-        # Ollama
+        # Kết nối Ollama
         try:
             from ollama import OllamaClient
             client = OllamaClient(host="127.0.0.1", port=11434)
@@ -108,9 +112,12 @@ with col1:
             st.error(f"[OLLAMA_ERROR] {e}")
             st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
 
+# --------------------------
+# Cột dữ liệu nguồn
+# --------------------------
 with col2:
     st.header("📂 Dữ liệu nguồn")
-    st.expander("Xem chi tiết các node đã trích xuất", expanded=True):
+    with st.expander("Xem chi tiết các node đã trích xuất", expanded=True):
         for idx, node in enumerate(nodes[:num_nodes]):
             st.markdown(f"**{idx+1}. {node['title']}**")
-            st.write(node['text'][:200] + "...")  # Hiển thị tóm tắt
+            st.write(node['text'][:200] + "...")  # chỉ show tóm tắt
