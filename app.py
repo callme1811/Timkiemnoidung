@@ -10,7 +10,7 @@ APP_TITLE = "PageIndex Local Document Search Demo"
 DEFAULT_MODEL = "gemma2:2b"
 
 BASE_DIR = Path(__file__).parent.resolve()
-DEFAULT_MD_PATH = BASE_DIR / "/workspaces/Timkiemnoidung/technova_ai_demo_data.md"
+DEFAULT_MD_PATH = BASE_DIR / "technova_ai_demo_data.md"
 RESULTS_DIR = BASE_DIR / "results"
 
 
