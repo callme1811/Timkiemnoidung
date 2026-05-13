@@ -104,7 +104,7 @@ with col1:
         # Kết nối Ollama
         try:
             from ollama import OllamaClient
-            client = OllamaClient(host="127.0.0.1", port=11434)
+            client = OllamaClient(host="127.0.0.1", port=11435)
             answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
             st.subheader("📝 Câu trả lời")
             st.write(answer)
