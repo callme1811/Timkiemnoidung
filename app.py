@@ -2,7 +2,6 @@ import streamlit as st
 import re
 from typing import List, Dict
 import os
-import subprocess
 
 # ==========================
 # Chia Markdown thành node theo heading
@@ -52,27 +51,14 @@ def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
 # ==========================
 # Load Markdown từ file
 # ==========================
-def load_markdown_from_file(file_path: str) -> List[Dict]:
+def load_markdown(file_path):
     if not os.path.exists(file_path):
-        st.error(f"❌ File {file_path} không tồn tại.")
+        st.warning(f"❌ File {file_path} không tồn tại, bỏ qua.")
         return []
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
     nodes = parse_markdown_to_nodes(text)
     return flatten_tree(nodes)
-
-# ==========================
-# Ollama query subprocess
-# ==========================
-def query_ollama(prompt: str) -> str:
-    try:
-        result = subprocess.run(
-            ["ollama", "chat", "qwen", "--prompt", prompt],
-            capture_output=True, text=True, check=True
-        )
-        return result.stdout
-    except Exception as e:
-        return f"[OLLAMA_ERROR] {e}"
 
 # ==========================
 # Streamlit UI
@@ -89,37 +75,39 @@ with st.sidebar:
     - Nhập câu hỏi về tài liệu.
     - Xem các node liên quan.
     - Truy xuất Top N node làm context.
+    - Upload thêm file Markdown mới.
     """)
     st.markdown("---")
     st.header("💡 Hướng dẫn")
     st.markdown("""
-    1. Upload file Markdown mới nếu cần.
+    1. Upload file Markdown nếu muốn thêm tài liệu.
     2. Nhập câu hỏi ở khung chính.
     3. Chọn số node để phân tích.
     4. Nhấn 'Bắt đầu phân tích' và xem kết quả.
     """)
 
 # ==========================
-# Upload file Markdown mới
+# Upload thêm tài liệu
 # ==========================
 uploaded_file = st.sidebar.file_uploader("📂 Upload file Markdown", type=["md"])
-all_nodes = []
+uploaded_nodes = []
+if uploaded_file:
+    text = uploaded_file.read().decode("utf-8")
+    uploaded_nodes = flatten_tree(parse_markdown_to_nodes(text))
+    st.sidebar.success(f"✅ Đã tải lên: {uploaded_file.name}")
 
+# ==========================
 # Load file mặc định
-default_file = "technova_ai_demo_data.md"
-all_nodes.extend(load_markdown_from_file(default_file))
-
-# Load file upload nếu có
-if uploaded_file is not None:
-    uploaded_text = uploaded_file.getvalue().decode("utf-8")
-    uploaded_nodes = flatten_tree(parse_markdown_to_nodes(uploaded_text))
-    all_nodes.extend(uploaded_nodes)
-    st.sidebar.success(f"✅ Đã load {len(uploaded_nodes)} node từ file upload.")
+# ==========================
+default_nodes = load_markdown("technova_ai_demo_data.md")
+# Gộp nodes mặc định + nodes upload
+nodes = default_nodes + uploaded_nodes
 
 # ==========================
 # Main content
 # ==========================
 st.title("📊 DocAnalyzer - Intelligence Analyzer")
+
 col1, col2 = st.columns([2,1])
 
 with col1:
@@ -128,22 +116,38 @@ with col1:
 
     if st.button("🚀 Bắt đầu phân tích") and query:
         st.subheader("📌 Node được chọn")
-        for node in all_nodes[:num_nodes]:
+        for node in nodes[:num_nodes]:
             st.markdown(f"**{node['title']}**")
             st.write(node['text'])
 
-        # Chuẩn bị prompt
-        context_text = "\n\n".join([n['text'] for n in all_nodes[:num_nodes]])
-        full_prompt = f"{query}\n\n{context_text}"
+        # ==========================
+        # Ollama integration
+        # ==========================
+        try:
+            from ollama import Ollama
+            ollama_available = True
+        except ModuleNotFoundError:
+            ollama_available = False
 
-        # Gọi Ollama
-        answer = query_ollama(full_prompt)
-        st.subheader("📝 Câu trả lời tự động (Ollama)")
-        st.write(answer)
+        if ollama_available:
+            try:
+                # Sửa model theo Ollama bạn cài
+                client = Ollama()
+                answer = client.chat(
+                    model="qwen",
+                    messages=[{"role": "user", "content": f"{query}\n\nContext:\n" + "\n".join([n['text'] for n in nodes[:num_nodes]])}]
+                )
+                st.subheader("📝 Câu trả lời tự động (Ollama)")
+                st.write(answer)
+            except Exception as e:
+                st.error(f"[OLLAMA_ERROR] {e}")
+                st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
+        else:
+            st.warning("Ollama chưa cài hoặc server chưa chạy, chỉ hiển thị nội dung node Markdown.")
 
 with col2:
     st.header("📂 Dữ liệu nguồn")
     with st.expander("Xem chi tiết các node đã trích xuất", expanded=True):
-        for idx, node in enumerate(all_nodes[:num_nodes]):
+        for idx, node in enumerate(nodes[:num_nodes]):
             st.markdown(f"**{idx+1}. {node['title']}**")
-            st.write(node['text'][:200] + "...")  # chỉ show tóm tắt
+            st.write(node['text'][:200] + "...")
