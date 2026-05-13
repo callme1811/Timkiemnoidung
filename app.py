@@ -106,23 +106,27 @@ with col1:
             st.write(node['text'])
         
         # ==========================
-        # Ollama integration
+        # Ollama integration (phiên bản mới)
         # ==========================
         try:
-            from ollama import OllamaClient
+            from ollama import Ollama
             ollama_available = True
         except ModuleNotFoundError:
             ollama_available = False
 
         if ollama_available:
             try:
-                client = OllamaClient(host="127.0.0.1", port=11434)
-                answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
+                client = Ollama()
+                context_text = "\n\n".join([n['text'] for n in nodes[:num_nodes]])
+                answer = client.chat(
+                    model="qwen",
+                    messages=[{"role":"user", "content": f"{query}\n\n{context_text}"}]
+                )
                 st.subheader("📝 Câu trả lời tự động (Ollama)")
                 st.write(answer)
             except Exception as e:
                 st.error(f"[OLLAMA_ERROR] {e}")
-                st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
+                st.info("Chạy 'ollama serve' hoặc kiểm tra Ollama trên local.")
         else:
             st.warning("Ollama chưa cài hoặc server chưa chạy, chỉ hiển thị nội dung node Markdown.")
 
