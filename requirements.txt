@@ -1,7 +1,7 @@
 streamlit
 requests
 litellm
-openai
-pypdf
-markdown
-tiktoken
+PyPDF2
+pymupdf
+python-dotenv
+pyyaml
