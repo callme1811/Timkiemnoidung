@@ -1,6 +1,5 @@
 import json
 import re
-import subprocess
 from pathlib import Path
 
 import requests
@@ -11,14 +10,164 @@ APP_TITLE = "PageIndex Local Document Search Demo"
 DEFAULT_MODEL = "gemma2:2b"
 
 BASE_DIR = Path(__file__).parent.resolve()
-DEFAULT_MD_PATH = BASE_DIR / "technova_ai_demo_data.md"
+DEFAULT_MD_PATH = BASE_DIR / "/workspaces/Timkiemnoidung/technova_ai_demo_data.md"
 RESULTS_DIR = BASE_DIR / "results"
+
+
+# =========================
+# PATH HELPERS
+# =========================
+def normalize_path(path_text: str) -> Path:
+    p = Path(path_text).expanduser()
+    return p if p.is_absolute() else BASE_DIR / p
+
+
+def get_tree_path(md_path: Path) -> Path:
+    RESULTS_DIR.mkdir(exist_ok=True)
+    return RESULTS_DIR / f"{md_path.stem}_structure.json"
+
+
+# =========================
+# MARKDOWN TREE BUILDER
+# =========================
+def extract_markdown_nodes(md_text: str):
+    lines = md_text.splitlines()
+    nodes = []
+    in_code_block = False
+
+    for i, line in enumerate(lines, start=1):
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+
+        if in_code_block:
+            continue
+
+        match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        if match:
+            nodes.append({
+                "title": match.group(2).strip(),
+                "level": len(match.group(1)),
+                "line_num": i,
+                "nodes": []
+            })
+
+    return nodes, lines
+
+
+def add_text_to_nodes(nodes, lines):
+    for i, node in enumerate(nodes):
+        start = node["line_num"]
+
+        if i + 1 < len(nodes):
+            end = nodes[i + 1]["line_num"] - 1
+        else:
+            end = len(lines)
+
+        node["start_line"] = start
+        node["end_line"] = end
+        node["text"] = "\n".join(lines[start - 1:end]).strip()
+
+    return nodes
+
+
+def build_tree(flat_nodes):
+    root = []
+    stack = []
+    counter = 0
+
+    for node in flat_nodes:
+        counter += 1
+
+        tree_node = {
+            "title": node["title"],
+            "node_id": str(counter).zfill(4),
+            "line_num": node["line_num"],
+            "start_line": node["start_line"],
+            "end_line": node["end_line"],
+            "text": node["text"],
+            "nodes": []
+        }
+
+        while stack and stack[-1]["level"] >= node["level"]:
+            stack.pop()
+
+        if stack:
+            stack[-1]["node"]["nodes"].append(tree_node)
+        else:
+            root.append(tree_node)
+
+        stack.append({
+            "level": node["level"],
+            "node": tree_node
+        })
+
+    return root
+
+
+def build_markdown_tree(md_path: Path):
+    md_text = md_path.read_text(encoding="utf-8")
+    flat_nodes, lines = extract_markdown_nodes(md_text)
+
+    if not flat_nodes:
+        flat_nodes = [{
+            "title": md_path.stem,
+            "level": 1,
+            "line_num": 1,
+            "nodes": []
+        }]
+
+    flat_nodes = add_text_to_nodes(flat_nodes, lines)
+    tree = build_tree(flat_nodes)
+
+    data = {
+        "doc_name": md_path.stem,
+        "line_count": len(lines),
+        "structure": tree
+    }
+
+    tree_path = get_tree_path(md_path)
+    tree_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False),
+        encoding="utf-8"
+    )
+
+    return tree_path, data
+
+
+# =========================
+# TREE PROCESSING
+# =========================
+def flatten_tree(nodes, parent_path=""):
+    result = []
+
+    for node in nodes:
+        title = node.get("title", "")
+        path = f"{parent_path} > {title}" if parent_path else title
+
+        result.append({
+            "node_id": node.get("node_id", ""),
+            "title": title,
+            "path": path,
+            "line_num": node.get("line_num"),
+            "start_line": node.get("start_line"),
+            "end_line": node.get("end_line"),
+            "text": node.get("text", "")
+        })
+
+        children = node.get("nodes", [])
+        if children:
+            result.extend(flatten_tree(children, path))
+
+    return result
 
 
 # =========================
 # OLLAMA
 # =========================
-def ollama_generate(prompt: str, model: str = DEFAULT_MODEL, temperature: float = 0.1):
+def ollama_generate(prompt: str, model: str, temperature: float = 0.1):
     url = "http://127.0.0.1:11434/v1/chat/completions"
 
     payload = {
@@ -31,121 +180,34 @@ def ollama_generate(prompt: str, model: str = DEFAULT_MODEL, temperature: float 
     try:
         res = requests.post(url, json=payload, timeout=180)
         res.raise_for_status()
-        data = res.json()
-        return data["choices"][0]["message"]["content"].strip()
+        return res.json()["choices"][0]["message"]["content"].strip()
+
     except Exception as e:
         return f"[OLLAMA_ERROR] {e}"
 
 
 # =========================
-# FILE HELPERS
-# =========================
-def normalize_path(path_text: str) -> Path:
-    p = Path(path_text).expanduser()
-
-    if p.is_absolute():
-        return p
-
-    return BASE_DIR / p
-
-
-def read_markdown_lines(md_path: Path):
-    with open(md_path, "r", encoding="utf-8") as f:
-        return f.readlines()
-
-
-def load_tree(tree_path: Path):
-    with open(tree_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def find_tree_output_path(md_path: Path):
-    stem = md_path.stem
-    return RESULTS_DIR / f"{stem}_structure.json"
-
-
-# =========================
-# PAGEINDEX BUILD
-# =========================
-def build_pageindex_tree(md_path: Path, model: str):
-    run_script = BASE_DIR / "run_pageindex.py"
-
-    cmd = [
-        "python3",
-        str(run_script),
-        "--md_path",
-        str(md_path),
-        "--model",
-        f"ollama/{model}",
-    ]
-
-    process = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        shell=False,
-        cwd=str(BASE_DIR),
-    )
-
-    return process.returncode, process.stdout, process.stderr
-
-
-# =========================
-# TREE PROCESSING
-# =========================
-def flatten_nodes(nodes, parent_path=""):
-    result = []
-
-    for node in nodes:
-        title = node.get("title", "")
-        node_id = node.get("node_id", "")
-        line_num = node.get("line_num", None)
-
-        path = f"{parent_path} > {title}" if parent_path else title
-
-        result.append({
-            "node_id": node_id,
-            "title": title,
-            "line_num": line_num,
-            "path": path,
-        })
-
-        if "nodes" in node:
-            result.extend(flatten_nodes(node["nodes"], path))
-
-    return result
-
-
-def add_line_ranges(flat_nodes, total_lines):
-    sorted_nodes = sorted(
-        [n for n in flat_nodes if n.get("line_num") is not None],
-        key=lambda x: x["line_num"],
-    )
-
-    for i, node in enumerate(sorted_nodes):
-        start = node["line_num"]
-
-        if i + 1 < len(sorted_nodes):
-            end = sorted_nodes[i + 1]["line_num"] - 1
-        else:
-            end = total_lines
-
-        node["start_line"] = start
-        node["end_line"] = end
-
-    return sorted_nodes
-
-
-def extract_node_text(md_lines, node):
-    start = max(node["start_line"] - 1, 0)
-    end = min(node["end_line"], len(md_lines))
-    return "".join(md_lines[start:end]).strip()
-
-
-# =========================
 # RETRIEVAL
 # =========================
-def select_relevant_nodes(question, nodes, model, top_k=3):
+def simple_keyword_score(question: str, node_text: str):
+    q_words = set(re.findall(r"\w+", question.lower()))
+    t_words = set(re.findall(r"\w+", node_text.lower()))
+
+    if not q_words:
+        return 0
+
+    return len(q_words & t_words)
+
+
+def select_relevant_nodes(question, nodes, model, top_k=3, use_ollama=True):
+    if not use_ollama:
+        ranked = sorted(
+            nodes,
+            key=lambda n: simple_keyword_score(question, n.get("text", "")),
+            reverse=True
+        )
+        return ranked[:top_k], "keyword fallback"
+
     node_list = "\n".join([
         f"- {n['node_id']}: {n['path']} "
         f"(lines {n['start_line']}-{n['end_line']})"
@@ -153,9 +215,9 @@ def select_relevant_nodes(question, nodes, model, top_k=3):
     ])
 
     prompt = f"""
-Bạn là hệ thống retrieval PageIndex.
+Bạn là hệ thống retrieval.
 
-Hãy chọn tối đa {top_k} node phù hợp nhất.
+Chọn tối đa {top_k} node phù hợp nhất với câu hỏi.
 
 QUY TẮC:
 - Chỉ trả về node_id
@@ -167,44 +229,49 @@ CÂU HỎI:
 
 DANH SÁCH NODE:
 {node_list}
-
-Ví dụ:
-0006, 0011
 """
 
     response = ollama_generate(prompt, model=model, temperature=0.0)
+
+    if response.startswith("[OLLAMA_ERROR]"):
+        ranked = sorted(
+            nodes,
+            key=lambda n: simple_keyword_score(question, n.get("text", "")),
+            reverse=True
+        )
+        return ranked[:top_k], response + "\n\nĐã dùng keyword fallback."
 
     ids = re.findall(r"\b\d{4}\b", response)
     ids = list(dict.fromkeys(ids))[:top_k]
 
     selected = [n for n in nodes if n["node_id"] in ids]
 
+    if not selected:
+        ranked = sorted(
+            nodes,
+            key=lambda n: simple_keyword_score(question, n.get("text", "")),
+            reverse=True
+        )
+        selected = ranked[:top_k]
+
     return selected, response
 
 
-# =========================
-# ANSWER
-# =========================
-def answer_question(question, selected_nodes, md_lines, model):
-    contexts = []
+def answer_question(question, selected_nodes, model, use_ollama=True):
+    context_text = "\n\n---\n\n".join([
+        f"[Node {n['node_id']} | {n['path']} | lines {n['start_line']}-{n['end_line']}]\n\n{n['text']}"
+        for n in selected_nodes
+    ])
 
-    for node in selected_nodes:
-        text = extract_node_text(md_lines, node)
-
-        contexts.append(
-            f"[Node {node['node_id']} | "
-            f"{node['path']} | "
-            f"lines {node['start_line']}-{node['end_line']}]\n\n{text}"
-        )
-
-    context_text = "\n\n---\n\n".join(contexts)
+    if not use_ollama:
+        return "Đã tìm thấy các đoạn liên quan. Bật Ollama để sinh câu trả lời tự động.", context_text
 
     prompt = f"""
 Bạn là trợ lý tìm kiếm tài liệu.
 
 Chỉ trả lời dựa trên CONTEXT.
 
-Nếu không có thông tin:
+Nếu không có thông tin, trả lời:
 "Không tìm thấy thông tin trong tài liệu."
 
 CÂU HỎI:
@@ -232,11 +299,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🔎 PageIndex Local Document Search Demo")
-
-st.caption(
-    "Markdown → PageIndex Tree → Ollama/Gemma Reasoning → Answer"
-)
+st.title(" PageIndex Local Document Search Demo")
+st.caption("Markdown → Tree → Retrieval → Ollama/Gemma Answer")
 
 
 # =========================
@@ -255,42 +319,43 @@ with st.sidebar:
         value=DEFAULT_MODEL
     )
 
-    st.markdown("---")
-
-    build_button = st.button(
-        "1. Build PageIndex Tree"
+    use_ollama = st.checkbox(
+        "Dùng Ollama để trả lời",
+        value=True
     )
 
+    st.markdown("---")
+
+    build_button = st.button("1. Build Tree")
+
     st.info(
-        "Ollama phải chạy ở 127.0.0.1:11434"
+        "Codespaces dùng Ollama local được. Streamlit Cloud thường không gọi được 127.0.0.1:11434."
     )
 
 
 md_path = normalize_path(md_path_input)
-tree_path = find_tree_output_path(md_path)
+tree_path = get_tree_path(md_path)
 
 
 # =========================
 # BUILD TREE
 # =========================
 if build_button:
+    st.subheader("Kết quả build")
+
     if not md_path.exists():
         st.error(f"Không tìm thấy file markdown: {md_path}")
     else:
-        with st.spinner("Đang build tree..."):
-            code, stdout, stderr = build_pageindex_tree(md_path, model)
+        try:
+            with st.spinner("Đang build tree..."):
+                tree_path, tree_data = build_markdown_tree(md_path)
 
-        st.subheader("Kết quả build")
+            st.success(f"Build tree thành công: {tree_path}")
+            st.code(json.dumps(tree_data, indent=2, ensure_ascii=False)[:3000])
 
-        st.code(stdout or "(không có output)")
-
-        if stderr:
-            st.code(stderr)
-
-        if code == 0:
-            st.success("Build tree thành công.")
-        else:
+        except Exception as e:
             st.error("Build tree thất bại.")
+            st.exception(e)
 
 
 # =========================
@@ -301,23 +366,15 @@ st.subheader("2. Load tree structure")
 if tree_path.exists():
     st.success(f"Đã tìm thấy tree: {tree_path}")
 
-    tree = load_tree(tree_path)
-    md_lines = read_markdown_lines(md_path)
+    tree = json.loads(tree_path.read_text(encoding="utf-8"))
 
     raw_nodes = tree.get("structure", [])
-
-    flat_nodes = flatten_nodes(raw_nodes)
-
-    nodes = add_line_ranges(
-        flat_nodes,
-        len(md_lines)
-    )
+    nodes = flatten_tree(raw_nodes)
 
     with st.expander("Danh sách node"):
         for n in nodes:
             st.write(
-                f"{n['node_id']} — "
-                f"{n['path']} "
+                f"{n['node_id']} — {n['path']} "
                 f"(lines {n['start_line']}-{n['end_line']})"
             )
 
@@ -336,19 +393,20 @@ if tree_path.exists():
     )
 
     if st.button("Tìm kiếm và trả lời"):
-        with st.spinner("Đang reasoning..."):
+        with st.spinner("Đang tìm kiếm..."):
             selected_nodes, raw_selection = select_relevant_nodes(
-                question,
-                nodes,
-                model,
-                top_k
+                question=question,
+                nodes=nodes,
+                model=model,
+                top_k=top_k,
+                use_ollama=use_ollama
             )
 
             answer, context_text = answer_question(
-                question,
-                selected_nodes,
-                md_lines,
-                model
+                question=question,
+                selected_nodes=selected_nodes,
+                model=model,
+                use_ollama=use_ollama
             )
 
         col1, col2 = st.columns(2)
@@ -358,12 +416,8 @@ if tree_path.exists():
             st.code(raw_selection)
 
             for node in selected_nodes:
-                st.markdown(
-                    f"**{node['node_id']} — {node['path']}**"
-                )
-                st.caption(
-                    f"lines {node['start_line']}-{node['end_line']}"
-                )
+                st.markdown(f"**{node['node_id']} — {node['path']}**")
+                st.caption(f"lines {node['start_line']}-{node['end_line']}")
 
         with col2:
             st.markdown("### Câu trả lời")
@@ -374,6 +428,5 @@ if tree_path.exists():
 
 else:
     st.warning(
-        "Chưa thấy file tree JSON. "
-        "Hãy bấm Build PageIndex Tree trước."
+        "Chưa thấy file tree JSON. Hãy bấm Build Tree trước."
     )
