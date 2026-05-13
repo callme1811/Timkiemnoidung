@@ -40,9 +40,8 @@ def parse_markdown_to_nodes(md_text: str) -> List[Dict]:
 def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
     result = []
     for node in nodes:
-        title = node.get("title", "")
-        path = f"{parent_path} > {title}" if parent_path else title
-        result.append({"title": title, "text": node.get("text", "")})
+        path = f"{parent_path} > {node.get('title', '')}" if parent_path else node.get('title', '')
+        result.append({"title": node.get("title", ""), "text": node.get("text", "")})
         children = node.get("nodes", [])
         if children:
             result.extend(flatten_tree(children, path))
@@ -106,7 +105,7 @@ with col1:
             st.write(node['text'])
         
         # ==========================
-        # Ollama integration (phiên bản mới)
+        # Ollama integration
         # ==========================
         try:
             from ollama import Ollama
@@ -116,11 +115,11 @@ with col1:
 
         if ollama_available:
             try:
-                client = Ollama()
+                client = Ollama(host="127.0.0.1", port=11434)
                 context_text = "\n\n".join([n['text'] for n in nodes[:num_nodes]])
                 answer = client.chat(
-                    model="qwen",
-                    messages=[{"role":"user", "content": f"{query}\n\n{context_text}"}]
+                    model="qwen",  # sửa thành model bạn cài trên Ollama
+                    messages=[{"role":"user","content": f"{query}\n\n{context_text}"}]
                 )
                 st.subheader("📝 Câu trả lời tự động (Ollama)")
                 st.write(answer)
