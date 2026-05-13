@@ -1,7 +1,2 @@
 streamlit
 requests
-litellm
-PyPDF2
-pymupdf
-python-dotenv
-pyyaml
