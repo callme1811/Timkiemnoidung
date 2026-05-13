@@ -1,6 +1,7 @@
 import streamlit as st
 import re
 from typing import List, Dict
+import os
 
 # ==========================
 # Chia Markdown thành node theo heading
@@ -51,13 +52,17 @@ def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
 # Load Markdown
 # ==========================
 @st.cache_data
-def load_markdown(file_path="technova_ai_demo_data.md"):
+def load_markdown(file_path="demo_document.md"):
+    if not os.path.exists(file_path):
+        st.error(f"❌ File {file_path} không tồn tại. Vui lòng kiểm tra đường dẫn.")
+        return []
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
     nodes = parse_markdown_to_nodes(text)
     return flatten_tree(nodes)
 
-nodes = load_markdown()
+# Update file path nếu cần
+nodes = load_markdown(file_path="technova_ai_demo_data.md")  # hoặc demo_document.md
 
 # ==========================
 # Streamlit UI
@@ -100,17 +105,27 @@ with col1:
         for node in nodes[:num_nodes]:
             st.markdown(f"**{node['title']}**")
             st.write(node['text'])
-
-        # Kết nối Ollama
+        
+        # ==========================
+        # Ollama fallback
+        # ==========================
         try:
             from ollama import OllamaClient
-            client = OllamaClient(host="127.0.0.1", port=11435)
-            answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
-            st.subheader("📝 Câu trả lời")
-            st.write(answer)
-        except Exception as e:
-            st.error(f"[OLLAMA_ERROR] {e}")
-            st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
+            ollama_available = True
+        except ModuleNotFoundError:
+            ollama_available = False
+
+        if ollama_available:
+            try:
+                client = OllamaClient(host="127.0.0.1", port=11434)
+                answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
+                st.subheader("📝 Câu trả lời")
+                st.write(answer)
+            except Exception as e:
+                st.error(f"[OLLAMA_ERROR] {e}")
+                st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
+        else:
+            st.warning("Ollama chưa cài hoặc server chưa chạy, chỉ hiển thị nội dung node Markdown.")
 
 # --------------------------
 # Cột dữ liệu nguồn
