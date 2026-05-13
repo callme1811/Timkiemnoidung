@@ -9,7 +9,7 @@ import streamlit as st
 
 
 APP_TITLE = "PageIndex Local Document Search Demo"
-DEFAULT_MODEL = "gemma2:9b"
+DEFAULT_MODEL = "gemma2:2b"
 
 
 def ollama_generate(prompt: str, model: str = DEFAULT_MODEL, temperature: float = 0.1) -> str:
