@@ -1,2 +1,7 @@
 streamlit
 requests
+litellm
+openai
+pypdf
+markdown
+tiktoken
