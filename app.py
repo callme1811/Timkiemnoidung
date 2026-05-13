@@ -3,18 +3,12 @@ import re
 from typing import List, Dict
 
 # ==========================
-# Chia Markdown thành node theo heading
+# Tách Markdown thành node theo heading
 # ==========================
 def parse_markdown_to_nodes(md_text: str) -> List[Dict]:
-    """
-    Tách Markdown thành node:
-    - # -> cấp 1
-    - ## -> cấp 2
-    - ### -> cấp 3
-    """
     nodes = []
     lines = md_text.split("\n")
-    stack = []  # lưu node cấp trên
+    stack = []
 
     for line in lines:
         header_match = re.match(r'^(#{1,3})\s+(.*)', line)
@@ -22,50 +16,39 @@ def parse_markdown_to_nodes(md_text: str) -> List[Dict]:
             level = len(header_match.group(1))
             title = header_match.group(2).strip()
             node = {"title": title, "text": "", "nodes": []}
-
-            # Xác định cấp cha dựa vào stack
             while stack and stack[-1][0] >= level:
                 stack.pop()
-
             if stack:
-                # node này là con của node trên stack
                 stack[-1][1]["nodes"].append(node)
             else:
                 nodes.append(node)
-
             stack.append((level, node))
         else:
-            # Gán text vào node cuối cùng trên stack
             if stack:
                 stack[-1][1]["text"] += line + "\n"
             else:
-                # nếu chưa có header, tạo node default
                 if not nodes:
                     nodes.append({"title": "Document", "text": line + "\n", "nodes": []})
                 else:
                     nodes[0]["text"] += line + "\n"
-
     return nodes
 
 # ==========================
-# Flatten tree node thành list
+# Flatten tree node
 # ==========================
 def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
     result = []
     for node in nodes:
         title = node.get("title", "")
         path = f"{parent_path} > {title}" if parent_path else title
-        result.append({
-            "title": title,
-            "text": node.get("text", "")
-        })
+        result.append({"title": title, "text": node.get("text", "")})
         children = node.get("nodes", [])
         if children:
             result.extend(flatten_tree(children, path))
     return result
 
 # ==========================
-# Load file Markdown
+# Load Markdown
 # ==========================
 @st.cache_data
 def load_markdown(file_path="technova_ai_demo_data.md"):
@@ -79,27 +62,55 @@ nodes = load_markdown()
 # ==========================
 # Streamlit UI
 # ==========================
-st.title("TechNova AI - Document QA")
+st.set_page_config(page_title="PageIndex Intelligence Analyzer", layout="wide")
 
-query = st.text_input("Nhập câu hỏi của bạn:")
+# Sidebar
+with st.sidebar:
+    st.title("📄 PageIndex Analyzer")
+    st.markdown("Hệ thống phân tích báo cáo thông minh")
+    st.markdown("---")
+    st.header("⚡ Chức năng nhanh")
+    st.markdown("""
+    - Nhập câu hỏi về PageIndex.
+    - Xem các node liên quan.
+    - Truy xuất Top N node làm context.
+    """)
+    st.markdown("---")
+    st.header("💡 Hướng dẫn")
+    st.markdown("""
+    1. Nhập câu hỏi ở khung chính.
+    2. Chọn số node để phân tích.
+    3. Nhấn 'Bắt đầu phân tích' và xem kết quả.
+    """)
 
-num_nodes = st.slider("Số node retrieval", 1, 10, 3)
+# Main content
+st.title("📊 PageIndex Intelligence Analyzer")
 
-if st.button("Tìm kiếm và trả lời") and query:
-    st.write("### Node được chọn:")
-    for node in nodes[:num_nodes]:
-        st.markdown(f"**{node['title']}**")
-        st.write(node['text'])
+col1, col2 = st.columns([2,1])
 
-    # ==========================
-    # Ollama
-    # ==========================
-    try:
-        from ollama import OllamaClient
-        client = OllamaClient(host="127.0.0.1", port=11434)
-        answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
-        st.write("### Câu trả lời:")
-        st.write(answer)
-    except Exception as e:
-        st.error(f"[OLLAMA_ERROR] {e}")
-        st.info("Đừng quên chạy 'ollama serve' ở terminal khác trước khi dùng.")
+with col1:
+    query = st.text_input("Nhập câu hỏi của bạn về PageIndex:", placeholder="Ví dụ: Liệt kê các mục trong Deployment Options...")
+    num_nodes = st.slider("Số node retrieval", 1, 10, 3)
+    if st.button("🚀 Bắt đầu phân tích") and query:
+        st.subheader("📌 Node được chọn")
+        for node in nodes[:num_nodes]:
+            st.markdown(f"**{node['title']}**")
+            st.write(node['text'])
+
+        # Ollama
+        try:
+            from ollama import OllamaClient
+            client = OllamaClient(host="127.0.0.1", port=11434)
+            answer = client.chat(query, context=[n['text'] for n in nodes[:num_nodes]])
+            st.subheader("📝 Câu trả lời")
+            st.write(answer)
+        except Exception as e:
+            st.error(f"[OLLAMA_ERROR] {e}")
+            st.info("Chạy 'ollama serve' ở terminal khác trước khi dùng.")
+
+with col2:
+    st.header("📂 Dữ liệu nguồn")
+    st.expander("Xem chi tiết các node đã trích xuất", expanded=True):
+        for idx, node in enumerate(nodes[:num_nodes]):
+            st.markdown(f"**{idx+1}. {node['title']}**")
+            st.write(node['text'][:200] + "...")  # Hiển thị tóm tắt
