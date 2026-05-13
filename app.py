@@ -51,7 +51,7 @@ def flatten_tree(nodes: List[Dict], parent_path="") -> List[Dict]:
 # Load Markdown
 # ==========================
 @st.cache_data
-def load_markdown(file_path="technova_ai_demo_data.md"):
+def load_markdown(file_path="demo_document.md"):
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read()
     nodes = parse_markdown_to_nodes(text)
@@ -62,16 +62,16 @@ nodes = load_markdown()
 # ==========================
 # Streamlit UI
 # ==========================
-st.set_page_config(page_title="PageIndex Intelligence Analyzer", layout="wide")
+st.set_page_config(page_title="DocAnalyzer - Intelligence Analyzer", layout="wide")
 
 # Sidebar
 with st.sidebar:
-    st.title("📄 PageIndex Analyzer")
-    st.markdown("Hệ thống phân tích báo cáo thông minh")
+    st.title("📄 DocAnalyzer")
+    st.markdown("Hệ thống phân tích nội dung tài liệu")
     st.markdown("---")
     st.header("⚡ Chức năng nhanh")
     st.markdown("""
-    - Nhập câu hỏi về PageIndex.
+    - Nhập câu hỏi về tài liệu.
     - Xem các node liên quan.
     - Truy xuất Top N node làm context.
     """)
@@ -84,7 +84,7 @@ with st.sidebar:
     """)
 
 # Main content
-st.title("📊 PageIndex Intelligence Analyzer")
+st.title("📊 DocAnalyzer - Intelligence Analyzer")
 
 col1, col2 = st.columns([2,1])
 
@@ -92,7 +92,7 @@ col1, col2 = st.columns([2,1])
 # Cột nhập câu hỏi + trả lời Ollama
 # --------------------------
 with col1:
-    query = st.text_input("Nhập câu hỏi của bạn về PageIndex:", placeholder="Ví dụ: Liệt kê các mục trong Deployment Options...")
+    query = st.text_input("Nhập câu hỏi của bạn về tài liệu:", placeholder="Ví dụ: Liệt kê các mục trong báo cáo demo...")
     num_nodes = st.slider("Số node retrieval", 1, 10, 3)
     
     if st.button("🚀 Bắt đầu phân tích") and query:
