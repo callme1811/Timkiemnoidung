@@ -211,7 +211,7 @@ with st.sidebar:
 
     md_path = st.text_input(
         "Đường dẫn file Markdown",
-        value=r"D:\Practice\Rag\TimKiemUngDung\Timkiemnoidung\technova_ai_demo_data.md",
+        value=r"/workspaces/Timkiemnoidung/technova_ai_demo_data.md",
     )
 
     model = st.text_input(
