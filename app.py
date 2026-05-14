@@ -1,5 +1,7 @@
+import os
 import re
-import uuid
+import time
+import hashlib
 from pathlib import Path
 
 import streamlit as st
@@ -16,8 +18,19 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-# Dán API key Gemini của bạn vào đây
-GEMINI_API_KEY = "AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"
+MODEL_NAME = "gemini-2.5-flash"
+MAX_OUTPUT_TOKENS = 1200
+TOP_K = 3
+
+
+# =========================================================
+# GEMINI API
+# =========================================================
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    st.error("Thiếu GEMINI_API_KEY. Hãy set biến môi trường GEMINI_API_KEY.")
+    st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -48,11 +61,20 @@ if "last_context" not in st.session_state:
 # =========================================================
 # FILE HELPERS
 # =========================================================
+def get_file_hash(file_bytes):
+    return hashlib.md5(file_bytes).hexdigest()
+
+
 def save_uploaded_file(uploaded_file):
-    file_id = str(uuid.uuid4())[:8]
+    file_bytes = uploaded_file.getvalue()
+    file_hash = get_file_hash(file_bytes)
+
     safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
-    save_path = UPLOADS_DIR / f"{file_id}_{safe_name}"
-    save_path.write_bytes(uploaded_file.getbuffer())
+    save_path = UPLOADS_DIR / f"{file_hash[:10]}_{safe_name}"
+
+    if not save_path.exists():
+        save_path.write_bytes(file_bytes)
+
     return save_path
 
 
@@ -78,17 +100,21 @@ def split_text(text, chunk_size=1200, overlap=150):
             continue
 
         if len(current_chunk) + len(para) + 1 <= chunk_size:
-            current_chunk += "\n" + para
+            if current_chunk:
+                current_chunk += "\n" + para
+            else:
+                current_chunk = para
         else:
             if current_chunk.strip():
                 chunks.append(current_chunk.strip())
 
             if len(para) > chunk_size:
                 start = 0
+
                 while start < len(para):
                     end = start + chunk_size
                     chunks.append(para[start:end].strip())
-                    start = end - overlap
+                    start = max(end - overlap, start + 1)
             else:
                 current_chunk = para
 
@@ -103,6 +129,7 @@ def split_text(text, chunk_size=1200, overlap=150):
 # =========================================================
 def extract_pdf_text(pdf_path):
     reader = PdfReader(str(pdf_path))
+
     nodes = []
     counter = 0
 
@@ -185,7 +212,12 @@ def extract_markdown_nodes(md_text):
 def add_text_to_nodes(nodes, lines):
     for i, node in enumerate(nodes):
         start = node["line_num"]
-        end = nodes[i + 1]["line_num"] - 1 if i + 1 < len(nodes) else len(lines)
+
+        end = (
+            nodes[i + 1]["line_num"] - 1
+            if i + 1 < len(nodes)
+            else len(lines)
+        )
 
         node["start_line"] = start
         node["end_line"] = end
@@ -206,8 +238,8 @@ def build_tree(flat_nodes):
             "title": node["title"],
             "node_id": str(counter).zfill(4),
             "line_num": node["line_num"],
-            "start_line": node["start_line"],
-            "end_line": node["end_line"],
+            "start_line": node.get("start_line"),
+            "end_line": node.get("end_line"),
             "text": node["text"],
             "nodes": [],
         }
@@ -302,11 +334,12 @@ def parse_document(file_path):
     return []
 
 
-def parse_uploaded_files(uploaded_files):
+@st.cache_data(show_spinner=False)
+def parse_uploaded_files_cached(file_infos):
     all_nodes = []
 
-    for uploaded_file in uploaded_files:
-        file_path = save_uploaded_file(uploaded_file)
+    for file_path_str in file_infos:
+        file_path = Path(file_path_str)
         nodes = parse_document(file_path)
         all_nodes.extend(nodes)
 
@@ -344,7 +377,7 @@ def keyword_score(question, text, title=""):
     return score
 
 
-def select_relevant_nodes(question, nodes, top_k=6):
+def select_relevant_nodes(question, nodes, top_k=TOP_K):
     if not nodes:
         return []
 
@@ -421,19 +454,6 @@ NẾU LÀ AI / AGENT / SYSTEM:
 - Giải thích cách các thành phần giao tiếp với nhau.
 - Sau khi trả lời xong, thêm ví dụ thực tế dễ hiểu.
 
-NẾU LÀ BÁO CÁO / SỐ LIỆU:
-- Tóm tắt ý chính.
-- Nêu số liệu quan trọng.
-- Phân tích xu hướng nếu có.
-- Nêu insight quan trọng.
-
-YÊU CẦU VÍ DỤ:
-- Ví dụ phải viết sau phần giải thích chính.
-- Ví dụ phải có đủ: bối cảnh, hành động, kết quả.
-- Không được viết câu cụt như: "Hãy tưởng..."
-- Không được bỏ dở câu trả lời giữa chừng.
-- Nếu tài liệu không cung cấp ví dụ cụ thể, hãy tự tạo ví dụ minh họa đơn giản nhưng phải nói rõ đó là "ví dụ minh họa".
-
 YÊU CẦU FORMAT:
 - Dùng markdown.
 - Có tiêu đề nhỏ.
@@ -470,44 +490,121 @@ def extract_chunk_text(chunk):
     return chunk_text
 
 
-def ask_gemini(question, context_text):
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    prompt = build_prompt(question, context_text)
+def ask_gemini_non_stream(prompt):
+    model = genai.GenerativeModel(MODEL_NAME)
 
     response = model.generate_content(
         prompt,
         generation_config={
             "temperature": 0.35,
-            "max_output_tokens": 3000,
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
         },
-        stream=True,
+        stream=False,
     )
 
-    full_text = ""
+    return getattr(response, "text", "") or ""
+
+
+def ask_gemini(question, context_text):
+    model = genai.GenerativeModel(MODEL_NAME)
+    prompt = build_prompt(question, context_text)
+
     response_placeholder = st.empty()
+    full_text = ""
 
-    try:
-        for chunk in response:
-            chunk_text = extract_chunk_text(chunk)
+    retries = 3
 
-            if chunk_text:
-                full_text += chunk_text
+    for attempt in range(retries):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.35,
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
+                },
+                stream=True,
+            )
 
-                response_placeholder.markdown(
-                    f"""
+            for chunk in response:
+                chunk_text = extract_chunk_text(chunk)
+
+                if chunk_text:
+                    full_text += chunk_text
+
+                    response_placeholder.markdown(
+                        f"""
 <div class="answer-box">
 
 {full_text}
 
 </div>
 """,
+                        unsafe_allow_html=True,
+                    )
+
+            if full_text.strip():
+                return full_text
+
+            raise Exception("Gemini không trả về nội dung.")
+
+        except Exception as e:
+            error_text = str(e)
+
+            if "503" in error_text or "overloaded" in error_text.lower():
+                wait_time = 2 * (attempt + 1)
+                st.warning(f"Gemini đang quá tải. Đang thử lại sau {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+
+            if "429" in error_text:
+                raise Exception(
+                    "Gemini đã hết quota hoặc bị giới hạn tốc độ. Hãy chờ reset quota hoặc đổi API key."
+                )
+
+            if "403" in error_text:
+                raise Exception(
+                    "API key hoặc project Gemini chưa có quyền truy cập model này."
+                )
+
+            st.warning("Stream bị lỗi. Đang chuyển sang chế độ non-stream...")
+
+            fallback_text = ask_gemini_non_stream(prompt)
+
+            if fallback_text.strip():
+                response_placeholder.markdown(
+                    f"""
+<div class="answer-box">
+
+{fallback_text}
+
+</div>
+""",
                     unsafe_allow_html=True,
                 )
 
-    except Exception as e:
-        st.error(f"Lỗi stream Gemini: {e}")
+                return fallback_text
 
-    return full_text
+            raise e
+
+    st.warning("Gemini vẫn quá tải sau nhiều lần thử. Đang dùng non-stream fallback...")
+
+    fallback_text = ask_gemini_non_stream(prompt)
+
+    if fallback_text.strip():
+        response_placeholder.markdown(
+            f"""
+<div class="answer-box">
+
+{fallback_text}
+
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+
+        return fallback_text
+
+    raise Exception("Gemini không trả về nội dung sau nhiều lần thử.")
 
 
 # =========================================================
@@ -572,6 +669,7 @@ with st.sidebar:
         st.session_state.messages = []
         st.session_state.question_history = []
         st.session_state.last_context = ""
+        st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
@@ -597,7 +695,7 @@ with st.sidebar:
 # HEADER
 # =========================================================
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
+st.caption("Chat với PDF, Markdown và TXT bằng Gemini")
 
 
 # =========================================================
@@ -643,7 +741,13 @@ if question:
         st.markdown(question)
 
     with st.spinner("📖 Đang đọc tài liệu..."):
-        all_nodes = parse_uploaded_files(uploaded_files)
+        saved_paths = []
+
+        for uploaded_file in uploaded_files:
+            file_path = save_uploaded_file(uploaded_file)
+            saved_paths.append(str(file_path))
+
+        all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
 
     if not all_nodes:
         st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
@@ -652,7 +756,7 @@ if question:
     selected_nodes = select_relevant_nodes(
         question=question,
         nodes=all_nodes,
-        top_k=6,
+        top_k=TOP_K,
     )
 
     context_text = build_context(selected_nodes)
@@ -668,27 +772,10 @@ if question:
                     "content": answer,
                 })
             else:
-                st.error(
-                    "Gemini không trả về nội dung. Hãy thử hỏi ngắn hơn hoặc giảm số tài liệu."
-                )
+                st.error("Gemini không trả về nội dung. Hãy thử hỏi ngắn hơn.")
 
         except Exception as e:
-            error_text = str(e)
-
-            if "429" in error_text:
-                st.error(
-                    "🚫 Gemini đã hết quota miễn phí. Hãy đổi API key hoặc chờ reset quota."
-                )
-            elif "finish_reason" in error_text:
-                st.error(
-                    "Gemini đã dừng phản hồi giữa chừng. Hãy hỏi ngắn hơn hoặc giảm số tài liệu."
-                )
-            elif "403" in error_text:
-                st.error(
-                    "🚫 API key hoặc project Gemini chưa có quyền truy cập. Hãy đổi API key/project khác."
-                )
-            else:
-                st.error(f"Lỗi Gemini: {e}")
+            st.error(f"Lỗi Gemini: {e}")
 
     with st.expander("📚 Xem context đã dùng"):
         st.code(context_text)
