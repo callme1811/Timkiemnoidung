@@ -506,7 +506,13 @@ def ask_gemini(question, context_text):
             for chunk in response:
                 chunk_text = extract_chunk_text(chunk)
 
-                if chunk_text:
+            if chunk_text:
+                    chunk_text = re.sub(
+                        r"\[SOURCE\s*\d+\]",
+                        "",
+                        chunk_text
+                    )
+                
                     full_text += chunk_text
 
                     response_placeholder.markdown(
