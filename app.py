@@ -20,7 +20,7 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 # =========================================================
 # GEMINI API
 # =========================================================
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+GEMINI_API_KEY = "AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"
 
 genai.configure(
     api_key=GEMINI_API_KEY
