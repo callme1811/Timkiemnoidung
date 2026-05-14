@@ -15,7 +15,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-GEMINI_API_KEY = "AIzaSyDZyz_6O7OoAkrS7a8P1-d7YbDrsBAlT5c"
+GEMINI_API_KEY = "AIzaSyAd9vKoF7oFeK_6YEd6Gcg-hqBo9Q2yefU"
 
 st.set_page_config(
     page_title=APP_TITLE,
