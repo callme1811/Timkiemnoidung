@@ -431,7 +431,7 @@ def keyword_score(
 def select_relevant_nodes(
     question,
     nodes,
-    top_k=5
+    top_k=6
 ):
 
     ranked = sorted(
@@ -663,7 +663,7 @@ st.caption(
 )
 
 # =========================================================
-# MULTI FILE UPLOAD
+# FILE UPLOAD
 # =========================================================
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
@@ -677,7 +677,7 @@ uploaded_files = st.file_uploader(
 )
 
 # =========================================================
-# CHAT HISTORY
+# SHOW CHAT HISTORY
 # =========================================================
 for msg in st.session_state.messages:
 
