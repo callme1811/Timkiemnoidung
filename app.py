@@ -1,4 +1,5 @@
 import re
+import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -6,9 +7,9 @@ import google.generativeai as genai
 from pypdf import PdfReader
 
 
-# ==================================================
+# =========================================================
 # CONFIG
-# ==================================================
+# =========================================================
 APP_TITLE = "DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -16,32 +17,40 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-# ==================================================
-# GEMINI API KEY
-# ==================================================
-GEMINI_API_KEY = "AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"
+# =========================================================
+# GEMINI API
+# =========================================================
+GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
 
 genai.configure(
     api_key=GEMINI_API_KEY
 )
 
-# ==================================================
-# STREAMLIT CONFIG
-# ==================================================
+# =========================================================
+# STREAMLIT
+# =========================================================
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="📄",
     layout="wide",
 )
 
+# =========================================================
+# SESSION STATE
+# =========================================================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# ==================================================
+# =========================================================
 # SAVE FILE
-# ==================================================
+# =========================================================
 def save_uploaded_file(uploaded_file):
 
+    file_id = str(uuid.uuid4())[:8]
+
     save_path = (
-        UPLOADS_DIR / uploaded_file.name
+        UPLOADS_DIR /
+        f"{file_id}_{uploaded_file.name}"
     )
 
     save_path.write_bytes(
@@ -50,57 +59,126 @@ def save_uploaded_file(uploaded_file):
 
     return save_path
 
+# =========================================================
+# TEXT CHUNKING
+# =========================================================
+def split_text(
+    text,
+    chunk_size=1200
+):
 
-# ==================================================
+    text = text.strip()
+
+    if not text:
+        return []
+
+    paragraphs = text.split("\n")
+
+    chunks = []
+
+    current_chunk = ""
+
+    for para in paragraphs:
+
+        para = para.strip()
+
+        if not para:
+            continue
+
+        if (
+            len(current_chunk) + len(para)
+            < chunk_size
+        ):
+
+            current_chunk += (
+                "\n" + para
+            )
+
+        else:
+
+            chunks.append(
+                current_chunk.strip()
+            )
+
+            current_chunk = para
+
+    if current_chunk:
+        chunks.append(
+            current_chunk.strip()
+        )
+
+    return chunks
+
+# =========================================================
 # PDF PARSER
-# ==================================================
-def extract_pdf_text(pdf_path: Path):
+# =========================================================
+def extract_pdf_text(pdf_path):
 
-    reader = PdfReader(str(pdf_path))
+    reader = PdfReader(
+        str(pdf_path)
+    )
 
-    pages = []
+    nodes = []
 
-    for index, page in enumerate(
+    counter = 0
+
+    for page_index, page in enumerate(
         reader.pages,
         start=1
     ):
 
-        text = page.extract_text() or ""
+        text = (
+            page.extract_text()
+            or ""
+        )
 
-        if text.strip():
+        chunks = split_text(text)
 
-            pages.append({
-                "node_id": str(index).zfill(4),
-                "title": f"Page {index}",
-                "path": f"{pdf_path.name} > Page {index}",
-                "text": text.strip(),
+        for chunk in chunks:
+
+            counter += 1
+
+            nodes.append({
+                "node_id": str(counter).zfill(4),
+                "title": f"Page {page_index}",
+                "path": f"{pdf_path.name} > Page {page_index}",
+                "text": chunk,
             })
 
-    return pages
+    return nodes
 
-
-# ==================================================
+# =========================================================
 # TXT PARSER
-# ==================================================
-def extract_txt_nodes(file_path: Path):
+# =========================================================
+def extract_txt_nodes(file_path):
 
     text = file_path.read_text(
         encoding="utf-8",
         errors="ignore"
     )
 
-    return [{
-        "node_id": "0001",
-        "title": file_path.name,
-        "path": file_path.name,
-        "text": text.strip(),
-    }]
+    chunks = split_text(text)
 
+    nodes = []
 
-# ==================================================
+    for i, chunk in enumerate(
+        chunks,
+        start=1
+    ):
+
+        nodes.append({
+            "node_id": str(i).zfill(4),
+            "title": file_path.name,
+            "path": file_path.name,
+            "text": chunk,
+        })
+
+    return nodes
+
+# =========================================================
 # MARKDOWN PARSER
-# ==================================================
-def extract_markdown_nodes(md_text: str):
+# =========================================================
+def extract_markdown_nodes(md_text):
 
     lines = md_text.splitlines()
 
@@ -141,8 +219,10 @@ def extract_markdown_nodes(md_text: str):
 
     return nodes, lines
 
-
-def add_text_to_nodes(nodes, lines):
+def add_text_to_nodes(
+    nodes,
+    lines
+):
 
     for i, node in enumerate(nodes):
 
@@ -154,12 +234,13 @@ def add_text_to_nodes(nodes, lines):
             else len(lines)
         )
 
-        node["text"] = "\n".join(
+        text = "\n".join(
             lines[start - 1:end]
         ).strip()
 
-    return nodes
+        node["text"] = text
 
+    return nodes
 
 def build_tree(flat_nodes):
 
@@ -203,7 +284,6 @@ def build_tree(flat_nodes):
 
     return root
 
-
 def flatten_tree(
     nodes,
     parent_path=""
@@ -213,7 +293,10 @@ def flatten_tree(
 
     for node in nodes:
 
-        title = node.get("title", "")
+        title = node.get(
+            "title",
+            ""
+        )
 
         path = (
             f"{parent_path} > {title}"
@@ -221,18 +304,21 @@ def flatten_tree(
             else title
         )
 
-        result.append({
-            "node_id": node.get(
-                "node_id",
-                ""
-            ),
-            "title": title,
-            "path": path,
-            "text": node.get(
-                "text",
-                ""
-            ),
-        })
+        text_chunks = split_text(
+            node.get("text", "")
+        )
+
+        for chunk in text_chunks:
+
+            result.append({
+                "node_id": node.get(
+                    "node_id",
+                    ""
+                ),
+                "title": title,
+                "path": path,
+                "text": chunk,
+            })
 
         children = node.get(
             "nodes",
@@ -250,10 +336,7 @@ def flatten_tree(
 
     return result
 
-
-def parse_markdown(
-    file_path: Path
-):
+def parse_markdown(file_path):
 
     md_text = file_path.read_text(
         encoding="utf-8",
@@ -283,13 +366,10 @@ def parse_markdown(
 
     return flatten_tree(tree)
 
-
-# ==================================================
+# =========================================================
 # DOCUMENT PARSER
-# ==================================================
-def parse_document(
-    file_path: Path
-):
+# =========================================================
+def parse_document(file_path):
 
     suffix = (
         file_path.suffix.lower()
@@ -318,10 +398,9 @@ def parse_document(
 
     return []
 
-
-# ==================================================
+# =========================================================
 # RETRIEVAL
-# ==================================================
+# =========================================================
 def keyword_score(
     question,
     text,
@@ -346,7 +425,6 @@ def keyword_score(
 
     return score
 
-
 def select_relevant_nodes(
     question,
     nodes,
@@ -357,8 +435,8 @@ def select_relevant_nodes(
         nodes,
         key=lambda n: keyword_score(
             question,
-            n.get("text", ""),
-            n.get("title", "")
+            n["text"],
+            n["title"]
         ),
         reverse=True,
     )
@@ -367,8 +445,8 @@ def select_relevant_nodes(
         n for n in ranked
         if keyword_score(
             question,
-            n.get("text", ""),
-            n.get("title", "")
+            n["text"],
+            n["title"]
         ) > 0
     ]
 
@@ -376,7 +454,6 @@ def select_relevant_nodes(
         selected = ranked
 
     return selected[:top_k]
-
 
 def build_context(
     selected_nodes
@@ -393,10 +470,9 @@ def build_context(
         for n in selected_nodes
     ])
 
-
-# ==================================================
+# =========================================================
 # GEMINI
-# ==================================================
+# =========================================================
 def ask_gemini(
     question,
     context_text
@@ -410,30 +486,30 @@ def ask_gemini(
 Bạn là AI chuyên phân tích tài liệu.
 
 NHIỆM VỤ:
-- Trả lời dựa trên CONTEXT được cung cấp.
-- Không được bịa thông tin ngoài tài liệu.
-- Giải thích đầy đủ để người đọc dễ hiểu.
+- Trả lời dựa trên CONTEXT.
+- Không được bịa.
+- Giải thích dễ hiểu.
 - Không trả lời quá ngắn.
-- Viết như đang giải thích cho người mới học.
-- Nếu có nhiều ý hãy chia bullet point.
+- Viết như đang hướng dẫn người mới.
+- Nếu có nhiều ý hãy dùng bullet point.
 
 NẾU LÀ KHÁI NIỆM:
 - Giải thích định nghĩa
 - Mục đích
 - Cách hoạt động
 - Ưu điểm
-- Ví dụ minh họa thực tế
+- Ví dụ minh họa
 
 NẾU LÀ AI / AGENT / SYSTEM:
-- Mô tả workflow
-- Các thành phần liên quan
-- Cách các thành phần hoạt động với nhau
-- Ví dụ thực tế dễ hiểu
+- Giải thích workflow
+- Thành phần liên quan
+- Cách giao tiếp
+- Ví dụ thực tế
 
 NẾU LÀ BÁO CÁO:
 - Tóm tắt ý chính
-- Phân tích xu hướng
-- Nêu insight quan trọng
+- Insight quan trọng
+- Xu hướng
 
 BẮT BUỘC:
 - Có ví dụ minh họa
@@ -455,23 +531,44 @@ CONTEXT:
         prompt,
         generation_config={
             "temperature": 0.4,
-            "max_output_tokens": 1200,
-        }
+            "max_output_tokens": 1500,
+        },
+        stream=True
     )
 
-    return response.text
+    full_text = ""
 
+    response_placeholder = st.empty()
 
-# ==================================================
+    for chunk in response:
+
+        if chunk.text:
+
+            full_text += chunk.text
+
+            response_placeholder.markdown(
+                f"""
+<div class="answer-box">
+
+{full_text}
+
+</div>
+""",
+                unsafe_allow_html=True
+            )
+
+    return full_text
+
+# =========================================================
 # UI
-# ==================================================
+# =========================================================
 st.markdown(
     """
 <style>
 
 .block-container{
     max-width:1000px;
-    padding-top:40px;
+    padding-top:30px;
 }
 
 .stButton button{
@@ -500,9 +597,16 @@ st.markdown(
     margin-top:10px;
 }
 
+.user-box{
+    padding:18px;
+    border-radius:16px;
+    background:#1f2937;
+    margin-bottom:12px;
+}
+
 </style>
 """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
 
 st.title(
@@ -510,42 +614,48 @@ st.title(
 )
 
 st.caption(
-    "Upload PDF, Markdown hoặc TXT rồi hỏi nội dung tài liệu."
+    "Chat với PDF, Markdown và TXT bằng Gemini 2.5"
 )
 
-uploaded_file = st.file_uploader(
+# =========================================================
+# MULTI FILE UPLOAD
+# =========================================================
+uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
     type=[
         "pdf",
         "md",
         "markdown",
         "txt"
-    ]
+    ],
+    accept_multiple_files=True
 )
 
-question = st.text_input(
-    "💬 Nhập câu hỏi",
-    placeholder="Hỏi nội dung tài liệu..."
+# =========================================================
+# CHAT HISTORY
+# =========================================================
+for msg in st.session_state.messages:
+
+    with st.chat_message(
+        msg["role"]
+    ):
+        st.markdown(
+            msg["content"]
+        )
+
+# =========================================================
+# USER INPUT
+# =========================================================
+question = st.chat_input(
+    "Hỏi nội dung tài liệu..."
 )
 
-top_k = st.slider(
-    "📚 Số đoạn dùng để trả lời",
-    min_value=1,
-    max_value=10,
-    value=5
-)
-
-ask_button = st.button(
-    "✨ Hỏi tài liệu"
-)
-
-
-# ==================================================
+# =========================================================
 # RUN
-# ==================================================
-if ask_button:
+# =========================================================
+if question:
 
-    if uploaded_file is None:
+    if not uploaded_files:
 
         st.warning(
             "Vui lòng upload tài liệu."
@@ -553,39 +663,38 @@ if ask_button:
 
         st.stop()
 
-    if not question.strip():
+    st.session_state.messages.append({
+        "role": "user",
+        "content": question
+    })
 
-        st.warning(
-            "Vui lòng nhập câu hỏi."
-        )
+    with st.chat_message("user"):
 
-        st.stop()
+        st.markdown(question)
+
+    all_nodes = []
 
     with st.spinner(
         "📖 Đang đọc tài liệu..."
     ):
 
-        file_path = save_uploaded_file(
-            uploaded_file
-        )
+        for uploaded_file in uploaded_files:
 
-        nodes = parse_document(
-            file_path
-        )
+            file_path = save_uploaded_file(
+                uploaded_file
+            )
 
-    if not nodes:
+            nodes = parse_document(
+                file_path
+            )
 
-        st.error(
-            "Không đọc được tài liệu."
-        )
-
-        st.stop()
+            all_nodes.extend(nodes)
 
     selected_nodes = (
         select_relevant_nodes(
             question=question,
-            nodes=nodes,
-            top_k=top_k,
+            nodes=all_nodes,
+            top_k=6,
         )
     )
 
@@ -593,8 +702,8 @@ if ask_button:
         selected_nodes
     )
 
-    with st.spinner(
-        "🤖 Gemini đang phân tích..."
+    with st.chat_message(
+        "assistant"
     ):
 
         try:
@@ -604,20 +713,10 @@ if ask_button:
                 context_text
             )
 
-            st.markdown(
-                "## 🤖 Câu trả lời"
-            )
-
-            st.markdown(
-                f"""
-<div class="answer-box">
-
-{answer}
-
-</div>
-""",
-                unsafe_allow_html=True
-            )
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer
+            })
 
         except Exception as e:
 
@@ -636,7 +735,7 @@ if ask_button:
                 )
 
     with st.expander(
-        "📚 Xem đoạn tài liệu đã dùng"
+        "📚 Xem context đã dùng"
     ):
 
         st.code(context_text)
