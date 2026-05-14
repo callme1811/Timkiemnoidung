@@ -7,34 +7,29 @@ from google import genai
 
 
 # =========================
-# CẤU HÌNH APP
+# CONFIG
 # =========================
-APP_TITLE = "DocAnalyzer - Gemini Document Search"
+APP_TITLE = "📄 DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
-DEFAULT_MD_PATH = BASE_DIR / "technova_ai_demo_data.md"
-RESULTS_DIR = BASE_DIR / "results"
 UPLOADS_DIR = BASE_DIR / "uploads"
 
-RESULTS_DIR.mkdir(exist_ok=True)
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-st.set_page_config(page_title=APP_TITLE, layout="wide")
+st.set_page_config(
+    page_title=APP_TITLE,
+    layout="wide",
+)
+
+# =========================
+# GEMINI KEY
+# =========================
+GEMINI_API_KEY = "AIzaSyDZyz_6O7OoAkrS7a8P1-d7YbDrsBAlT5c"
 
 
 # =========================
-# HÀM HỖ TRỢ
+# HELPERS
 # =========================
-def normalize_path(path_text: str) -> Path:
-    p = Path(path_text).expanduser()
-    return p if p.is_absolute() else BASE_DIR / p
-
-
-def get_tree_path(md_path: Path) -> Path:
-    safe_name = md_path.stem.replace(" ", "_")
-    return RESULTS_DIR / f"{safe_name}_structure.json"
-
-
 def save_uploaded_file(uploaded_file) -> Path:
     save_path = UPLOADS_DIR / uploaded_file.name
     save_path.write_bytes(uploaded_file.getbuffer())
@@ -42,10 +37,11 @@ def save_uploaded_file(uploaded_file) -> Path:
 
 
 # =========================
-# BUILD TREE TỪ MARKDOWN
+# MARKDOWN PARSER
 # =========================
 def extract_markdown_nodes(md_text: str):
     lines = md_text.splitlines()
+
     nodes = []
     in_code_block = False
 
@@ -60,6 +56,7 @@ def extract_markdown_nodes(md_text: str):
             continue
 
         match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+
         if match:
             nodes.append({
                 "title": match.group(2).strip(),
@@ -73,11 +70,19 @@ def extract_markdown_nodes(md_text: str):
 def add_text_to_nodes(nodes, lines):
     for i, node in enumerate(nodes):
         start = node["line_num"]
-        end = nodes[i + 1]["line_num"] - 1 if i + 1 < len(nodes) else len(lines)
+
+        end = (
+            nodes[i + 1]["line_num"] - 1
+            if i + 1 < len(nodes)
+            else len(lines)
+        )
 
         node["start_line"] = start
         node["end_line"] = end
-        node["text"] = "\n".join(lines[start - 1:end]).strip()
+
+        node["text"] = "\n".join(
+            lines[start - 1:end]
+        ).strip()
 
     return nodes
 
@@ -116,8 +121,42 @@ def build_tree(flat_nodes):
     return root
 
 
-def build_markdown_tree(md_path: Path):
-    md_text = md_path.read_text(encoding="utf-8")
+def flatten_tree(nodes, parent_path=""):
+    result = []
+
+    for node in nodes:
+        title = node.get("title", "")
+
+        path = (
+            f"{parent_path} > {title}"
+            if parent_path
+            else title
+        )
+
+        result.append({
+            "node_id": node.get("node_id", ""),
+            "title": title,
+            "path": path,
+            "start_line": node.get("start_line"),
+            "end_line": node.get("end_line"),
+            "text": node.get("text", ""),
+        })
+
+        children = node.get("nodes", [])
+
+        if children:
+            result.extend(
+                flatten_tree(children, path)
+            )
+
+    return result
+
+
+def parse_markdown(md_path: Path):
+    md_text = md_path.read_text(
+        encoding="utf-8"
+    )
+
     flat_nodes, lines = extract_markdown_nodes(md_text)
 
     if not flat_nodes:
@@ -127,60 +166,29 @@ def build_markdown_tree(md_path: Path):
             "line_num": 1,
         }]
 
-    flat_nodes = add_text_to_nodes(flat_nodes, lines)
-    tree = build_tree(flat_nodes)
-
-    data = {
-        "doc_name": md_path.stem,
-        "source_file": str(md_path),
-        "line_count": len(lines),
-        "structure": tree,
-    }
-
-    tree_path = get_tree_path(md_path)
-    tree_path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    flat_nodes = add_text_to_nodes(
+        flat_nodes,
+        lines
     )
 
-    return tree_path, data
+    tree = build_tree(flat_nodes)
 
-
-def flatten_tree(nodes, parent_path=""):
-    result = []
-
-    for node in nodes:
-        title = node.get("title", "")
-        path = f"{parent_path} > {title}" if parent_path else title
-
-        result.append({
-            "node_id": node.get("node_id", ""),
-            "title": title,
-            "path": path,
-            "line_num": node.get("line_num"),
-            "start_line": node.get("start_line"),
-            "end_line": node.get("end_line"),
-            "text": node.get("text", ""),
-        })
-
-        children = node.get("nodes", [])
-        if children:
-            result.extend(flatten_tree(children, path))
-
-    return result
+    return flatten_tree(tree)
 
 
 # =========================
-# RETRIEVAL KEYWORD
+# RETRIEVAL
 # =========================
-def keyword_score(question: str, node_text: str, node_title: str = ""):
-    q_words = re.findall(r"\w+", question.lower())
-    content = f"{node_title} {node_text}".lower()
+def keyword_score(question, text, title=""):
+    q_words = re.findall(
+        r"\w+",
+        question.lower()
+    )
 
-    if not q_words:
-        return 0
+    content = f"{title} {text}".lower()
 
     score = 0
+
     for word in q_words:
         if word in content:
             score += 1
@@ -188,53 +196,47 @@ def keyword_score(question: str, node_text: str, node_title: str = ""):
     return score
 
 
-def select_relevant_nodes(question, nodes, top_k=3):
+def select_relevant_nodes(
+    question,
+    nodes,
+    top_k=3
+):
     ranked = sorted(
         nodes,
         key=lambda n: keyword_score(
             question,
-            n.get("text", ""),
-            n.get("title", ""),
+            n["text"],
+            n["title"]
         ),
         reverse=True,
     )
 
-    selected = [
-        n for n in ranked
-        if keyword_score(question, n.get("text", ""), n.get("title", "")) > 0
-    ]
-
-    if not selected:
-        selected = ranked
-
-    return selected[:top_k]
+    return ranked[:top_k]
 
 
-def build_context_text(selected_nodes):
-    if not selected_nodes:
-        return ""
-
+def build_context(selected_nodes):
     return "\n\n---\n\n".join([
-        f"[Node {n['node_id']} | {n['path']} | lines {n['start_line']}-{n['end_line']}]\n\n{n['text']}"
+        f"""
+[Node {n['node_id']}]
+{n['text']}
+"""
         for n in selected_nodes
     ])
 
 
 # =========================
-# GEMINI ANSWER
+# GEMINI
 # =========================
-def ask_gemini(api_key: str, question: str, context_text: str):
-    client = genai.Client(api_key=api_key)
+def ask_gemini(question, context_text):
+    client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
 
     prompt = f"""
-Bạn là trợ lý phân tích tài liệu.
+Bạn là AI phân tích tài liệu.
 
-Nhiệm vụ:
-- Trả lời câu hỏi của người dùng dựa trên CONTEXT.
-- Không bịa thông tin ngoài tài liệu.
-- Nếu CONTEXT không có thông tin, hãy nói: "Không tìm thấy thông tin này trong tài liệu."
-- Trả lời bằng tiếng Việt.
-- Nên trích dẫn Node và dòng nếu có.
+Chỉ trả lời dựa trên CONTEXT.
+Không được bịa.
 
 QUESTION:
 {question}
@@ -252,140 +254,108 @@ CONTEXT:
 
 
 # =========================
-# STREAMLIT UI
+# UI
 # =========================
-st.title("📄 DocAnalyzer")
-st.caption("Upload Markdown → Build Tree → Search Nodes → Ask Gemini")
+st.markdown(
+    """
+    <style>
+    .main {
+        padding-top: 20px;
+    }
 
-with st.sidebar:
-    st.header("🔑 Gemini")
+    .stTextInput input {
+        border-radius: 12px;
+    }
 
-    gemini_key = st.text_input(
-        "AIzaSyDZyz_6O7OoAkrS7a8P1-d7YbDrsBAlT5c",
-        type="password",
-        help="Nhập API key để Gemini trả lời dựa trên tài liệu.",
+    .stButton button {
+        width: 100%;
+        border-radius: 12px;
+        height: 45px;
+        font-size: 16px;
+    }
+
+    .block-container {
+        max-width: 1100px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.title("📄 DocAnalyzer AI")
+st.caption(
+    "Chat với tài liệu Markdown bằng Gemini"
+)
+
+uploaded_file = st.file_uploader(
+    "Upload tài liệu Markdown",
+    type=["md", "markdown", "txt"]
+)
+
+question = st.text_input(
+    "💬 Hỏi tài liệu của bạn...",
+    placeholder="Ví dụ: doanh thu năm 2025 thế nào?"
+)
+
+top_k = st.slider(
+    "Số đoạn context",
+    min_value=1,
+    max_value=10,
+    value=3
+)
+
+ask_button = st.button("✨ Phân tích")
+
+# =========================
+# PROCESS
+# =========================
+if ask_button:
+
+    if uploaded_file is None:
+        st.warning("Vui lòng upload file.")
+        st.stop()
+
+    if not question.strip():
+        st.warning("Vui lòng nhập câu hỏi.")
+        st.stop()
+
+    save_path = save_uploaded_file(
+        uploaded_file
     )
 
-    st.markdown("---")
-    st.header("📂 Tài liệu")
+    with st.spinner(
+        "Đang đọc tài liệu..."
+    ):
+        nodes = parse_markdown(save_path)
 
-    uploaded_file = st.file_uploader(
-        "Upload file Markdown",
-        type=["md", "markdown", "txt"],
+    selected_nodes = select_relevant_nodes(
+        question,
+        nodes,
+        top_k
     )
 
-    if uploaded_file is not None:
-        uploaded_path = save_uploaded_file(uploaded_file)
-        st.success(f"Đã upload: {uploaded_file.name}")
-        default_path_value = str(uploaded_path)
-    else:
-        default_path_value = str(DEFAULT_MD_PATH)
-
-    md_path_input = st.text_input(
-        "Đường dẫn file Markdown",
-        value=default_path_value,
+    context_text = build_context(
+        selected_nodes
     )
 
-    build_button = st.button("Build Tree")
-
-    st.markdown("---")
-    st.header("Hướng dẫn")
-    st.markdown("""
-1. Nhập Gemini API key.  
-2. Upload file Markdown hoặc dùng file mặc định.  
-3. Bấm **Build Tree**.  
-4. Nhập câu hỏi.  
-5. Gemini sẽ trả lời dựa trên node liên quan.
-""")
-
-
-md_path = normalize_path(md_path_input)
-tree_path = get_tree_path(md_path)
-
-if build_button:
-    if not md_path.exists():
-        st.error(f"Không tìm thấy file Markdown: {md_path}")
-    else:
-        with st.spinner("Đang build tree..."):
-            tree_path, tree_data = build_markdown_tree(md_path)
-
-        st.success(f"Build tree thành công: {tree_path}")
-
-        with st.expander("Xem JSON tree"):
-            st.code(
-                json.dumps(tree_data, indent=2, ensure_ascii=False)[:5000],
-                language="json",
+    with st.spinner(
+        "Gemini đang phân tích..."
+    ):
+        try:
+            answer = ask_gemini(
+                question,
+                context_text
             )
 
+            st.markdown("## 🤖 Kết quả")
+            st.write(answer)
 
-st.subheader("1. Load tree structure")
-
-if tree_path.exists():
-    tree = json.loads(tree_path.read_text(encoding="utf-8"))
-    raw_nodes = tree.get("structure", [])
-    nodes = flatten_tree(raw_nodes)
-
-    st.success(f"Đã load tài liệu: {tree.get('doc_name', '')}")
-    st.caption(f"Tổng số node: {len(nodes)}")
-
-    with st.expander("Danh sách node"):
-        for n in nodes:
-            st.write(
-                f"{n['node_id']} — {n['path']} | lines {n['start_line']}-{n['end_line']}"
+        except Exception as e:
+            st.error(
+                f"Lỗi Gemini: {e}"
             )
 
-    st.subheader("2. Hỏi tài liệu")
-
-    question = st.text_input(
-        "Nhập câu hỏi",
-        placeholder="Ví dụ: Báo cáo doanh thu năm 2025 thế nào?",
-    )
-
-    top_k = st.slider(
-        "Số node retrieval",
-        min_value=1,
-        max_value=10,
-        value=3,
-    )
-
-    if st.button("Tìm kiếm"):
-        if not question.strip():
-            st.warning("Vui lòng nhập câu hỏi.")
-        else:
-            selected_nodes = select_relevant_nodes(question, nodes, top_k)
-            context_text = build_context_text(selected_nodes)
-
-            col1, col2 = st.columns([1.2, 1])
-
-            with col1:
-                st.markdown("### 📌 Node được chọn")
-
-                for node in selected_nodes:
-                    st.markdown(f"**{node['node_id']} — {node['path']}**")
-                    st.caption(
-                        f"lines {node['start_line']}-{node['end_line']}"
-                    )
-                    st.write(node["text"])
-
-            with col2:
-                st.markdown("### ✅ Kết quả Gemini")
-
-                if not gemini_key:
-                    st.warning("Chưa nhập Gemini API key.")
-                else:
-                    with st.spinner("Gemini đang trả lời..."):
-                        try:
-                            answer = ask_gemini(
-                                gemini_key,
-                                question,
-                                context_text,
-                            )
-                            st.write(answer)
-                        except Exception as e:
-                            st.error(f"Lỗi khi gọi Gemini: {e}")
-
-            with st.expander("Context đã gửi cho Gemini"):
-                st.code(context_text)
-
-else:
-    st.warning("Chưa thấy file tree JSON. Hãy upload file hoặc bấm Build Tree trước.")
+    with st.expander(
+        "📚 Context đã dùng"
+    ):
+        st.code(context_text)
