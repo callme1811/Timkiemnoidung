@@ -400,10 +400,19 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
 def build_context(selected_nodes):
     context_parts = []
 
-    for n in selected_nodes:
-        context_parts.append(n.get("text", ""))
+    for index, n in enumerate(selected_nodes, start=1):
+        context_parts.append(
+            f"""
+[SOURCE {index}]
+File: {n.get("source_file", "")}
+Vị trí: {n.get("path", "")}
 
-    return "\n\n".join(context_parts)
+Nội dung:
+{n.get("text", "")}
+"""
+        )
+
+    return "\n\n---\n\n".join(context_parts)
 
 
 # =========================================================
@@ -419,8 +428,6 @@ NHIỆM VỤ:
 - Giải thích dễ hiểu cho người mới.
 - Nếu có nhiều ý, dùng bullet point.
 - Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
-- Không hiển thị SOURCE.
-- Không nhắc [SOURCE 1], [SOURCE 2], [SOURCE 3].
 
 FORMAT:
 - Dùng markdown.
@@ -428,6 +435,7 @@ FORMAT:
 - Có bullet point.
 - Có phần "Ví dụ minh họa".
 - Có phần "Kết luận ngắn".
+- Nếu có thể, nhắc nguồn theo dạng [SOURCE 1], [SOURCE 2].
 
 Nếu tài liệu không có thông tin để trả lời:
 "Tôi không tìm thấy thông tin này trong tài liệu."
@@ -443,13 +451,6 @@ CONTEXT:
 # =========================================================
 # GEMINI
 # =========================================================
-def clean_answer(text):
-    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
-    text = re.sub(r"\s+\.", ".", text)
-    text = re.sub(r"\s+,", ",", text)
-    return text.strip()
-
-
 def extract_chunk_text(chunk):
     chunk_text = ""
 
@@ -479,8 +480,7 @@ def ask_gemini_non_stream(prompt):
         stream=False,
     )
 
-    text = getattr(response, "text", "") or ""
-    return clean_answer(text)
+    return getattr(response, "text", "") or ""
 
 
 def ask_gemini(question, context_text):
@@ -508,20 +508,17 @@ def ask_gemini(question, context_text):
 
                 if chunk_text:
                     full_text += chunk_text
-                    display_text = clean_answer(full_text)
 
                     response_placeholder.markdown(
                         f"""
 <div class="answer-box">
 
-{display_text}
+{full_text}
 
 </div>
 """,
                         unsafe_allow_html=True,
                     )
-
-            full_text = clean_answer(full_text)
 
             if full_text.strip():
                 return full_text
@@ -634,6 +631,7 @@ st.markdown(
 # SIDEBAR
 # =========================================================
 with st.sidebar:
+
     st.title("📚 Lịch sử")
 
     if st.button("🗑️ Xóa lịch sử"):
@@ -645,7 +643,10 @@ with st.sidebar:
 
     st.markdown("---")
 
-    history_list = st.session_state.get("question_history", [])
+    history_list = st.session_state.get(
+        "question_history",
+        []
+    )
 
     if len(history_list) > 0:
         for i, q in enumerate(history_list[::-1], start=1):
@@ -703,6 +704,7 @@ question = st.chat_input("Hỏi nội dung tài liệu...")
 # RUN
 # =========================================================
 if question:
+
     if not uploaded_files:
         st.warning("Vui lòng upload tài liệu.")
         st.stop()
