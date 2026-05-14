@@ -22,6 +22,7 @@ st.set_page_config(
 )
 
 # =========================
+
 # GEMINI KEY
 # =========================
 GEMINI_API_KEY = "AIzaSyDZyz_6O7OoAkrS7a8P1-d7YbDrsBAlT5c"
