@@ -116,9 +116,11 @@ def extract_markdown_nodes(md_text: str):
         stripped = line.strip()
 
         if stripped.startswith("```"):
+
             in_code_block = (
                 not in_code_block
             )
+
             continue
 
         if in_code_block:
@@ -265,6 +267,7 @@ def parse_markdown(
     )
 
     if not flat_nodes:
+
         return extract_txt_nodes(
             file_path
         )
@@ -293,6 +296,7 @@ def parse_document(
     )
 
     if suffix == ".pdf":
+
         return extract_pdf_text(
             file_path
         )
@@ -301,11 +305,13 @@ def parse_document(
         ".md",
         ".markdown"
     ]:
+
         return parse_markdown(
             file_path
         )
 
     if suffix == ".txt":
+
         return extract_txt_nodes(
             file_path
         )
@@ -397,7 +403,7 @@ def ask_gemini(
 ):
 
     model = genai.GenerativeModel(
-        "gemini-2.0-flash"
+        "gemini-2.5-flash"
     )
 
     prompt = f"""
@@ -408,40 +414,35 @@ NHIỆM VỤ:
 - Không được bịa thông tin ngoài tài liệu.
 - Giải thích đầy đủ để người đọc dễ hiểu.
 - Không trả lời quá ngắn.
-- Viết theo kiểu giải thích cho người mới học.
+- Viết như đang giải thích cho người mới học.
 - Nếu có nhiều ý hãy chia bullet point.
-- Nếu là khái niệm:
-    + giải thích định nghĩa
-    + mục đích
-    + cách hoạt động
-    + lợi ích
-    + nhược điểm nếu có
-    + ví dụ thực tế
-- Nếu là hệ thống/AI/Agent:
-    + mô tả flow hoạt động
-    + các thành phần liên quan
-    + cách các thành phần giao tiếp với nhau
-    + ví dụ minh họa thực tế
-- Nếu là báo cáo/số liệu:
-    + tóm tắt số liệu chính
-    + phân tích xu hướng
-    + nêu insight quan trọng
-- Luôn thêm:
-    + ví dụ minh họa
-    + tình huống thực tế
-    + cách áp dụng thực tế
-- Nếu tài liệu không có thông tin:
-  trả lời đúng:
-  "Tôi không tìm thấy thông tin này trong tài liệu."
 
-YÊU CẦU FORMAT:
-- Dùng markdown đẹp.
-- Có tiêu đề nhỏ.
-- Có bullet point.
-- Có ví dụ minh họa.
-- Có kết luận ngắn.
-- Không trả lời 1 câu cụt ngủn.
-- Giải thích rõ ràng để người không chuyên vẫn hiểu.
+NẾU LÀ KHÁI NIỆM:
+- Giải thích định nghĩa
+- Mục đích
+- Cách hoạt động
+- Ưu điểm
+- Ví dụ minh họa thực tế
+
+NẾU LÀ AI / AGENT / SYSTEM:
+- Mô tả workflow
+- Các thành phần liên quan
+- Cách các thành phần hoạt động với nhau
+- Ví dụ thực tế dễ hiểu
+
+NẾU LÀ BÁO CÁO:
+- Tóm tắt ý chính
+- Phân tích xu hướng
+- Nêu insight quan trọng
+
+BẮT BUỘC:
+- Có ví dụ minh họa
+- Có bullet point
+- Có kết luận ngắn
+- Dùng markdown đẹp
+
+Nếu tài liệu không có thông tin:
+"Tôi không tìm thấy thông tin này trong tài liệu."
 
 QUESTION:
 {question}
@@ -451,7 +452,11 @@ CONTEXT:
 """
 
     response = model.generate_content(
-        prompt
+        prompt,
+        generation_config={
+            "temperature": 0.4,
+            "max_output_tokens": 1200,
+        }
     )
 
     return response.text
@@ -520,9 +525,7 @@ uploaded_file = st.file_uploader(
 
 question = st.text_input(
     "💬 Nhập câu hỏi",
-    placeholder=(
-        "Ví dụ: Agent A2A là gì?"
-    )
+    placeholder="Hỏi nội dung tài liệu..."
 )
 
 top_k = st.slider(
@@ -618,9 +621,19 @@ if ask_button:
 
         except Exception as e:
 
-            st.error(
-                f"Lỗi Gemini: {e}"
-            )
+            error_text = str(e)
+
+            if "429" in error_text:
+
+                st.error(
+                    "🚫 Gemini đã hết quota miễn phí. Hãy đổi API key hoặc chờ reset quota."
+                )
+
+            else:
+
+                st.error(
+                    f"Lỗi Gemini: {e}"
+                )
 
     with st.expander(
         "📚 Xem đoạn tài liệu đã dùng"
