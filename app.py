@@ -8,9 +8,6 @@ import google.generativeai as genai
 from pypdf import PdfReader
 
 
-# =========================================================
-# CONFIG
-# =========================================================
 APP_TITLE = "DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -18,26 +15,19 @@ UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 MODEL_NAME = "gemini-2.5-flash"
-MAX_OUTPUT_TOKENS = 1200
+MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-# GHI API KEY TRỰC TIẾP Ở ĐÂY
+# GHI API KEY CỦA BẠN Ở ĐÂY
 GEMINI_API_KEY = "AIzaSyAuZ_Pxdbi1G-V_pnJgJoHbWrokf4DCDNw"
 
 
-# =========================================================
-# STREAMLIT CONFIG
-# =========================================================
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="📄",
     layout="wide",
 )
 
-
-# =========================================================
-# GEMINI CONFIG
-# =========================================================
 if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
     st.error("Bạn chưa điền GEMINI_API_KEY trong code.")
     st.stop()
@@ -45,9 +35,6 @@ if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
 genai.configure(api_key=GEMINI_API_KEY)
 
 
-# =========================================================
-# SESSION STATE
-# =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -58,9 +45,13 @@ if "last_context" not in st.session_state:
     st.session_state.last_context = ""
 
 
-# =========================================================
-# FILE HELPERS
-# =========================================================
+def clean_answer(text):
+    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
+    text = re.sub(r"\s+\.", ".", text)
+    text = re.sub(r"\s+,", ",", text)
+    return text.strip()
+
+
 def get_file_hash(file_bytes):
     return hashlib.md5(file_bytes).hexdigest()
 
@@ -78,10 +69,7 @@ def save_uploaded_file(uploaded_file):
     return save_path
 
 
-# =========================================================
-# TEXT CHUNKING
-# =========================================================
-def split_text(text, chunk_size=1200, overlap=150):
+def split_text(text, chunk_size=1000, overlap=120):
     text = text.strip()
 
     if not text:
@@ -121,9 +109,6 @@ def split_text(text, chunk_size=1200, overlap=150):
     return chunks
 
 
-# =========================================================
-# PDF PARSER
-# =========================================================
 def extract_pdf_text(pdf_path):
     reader = PdfReader(str(pdf_path))
 
@@ -150,9 +135,6 @@ def extract_pdf_text(pdf_path):
     return nodes
 
 
-# =========================================================
-# TXT PARSER
-# =========================================================
 def extract_txt_nodes(file_path):
     text = file_path.read_text(
         encoding="utf-8",
@@ -176,9 +158,6 @@ def extract_txt_nodes(file_path):
     return nodes
 
 
-# =========================================================
-# MARKDOWN PARSER
-# =========================================================
 def extract_markdown_nodes(md_text):
     lines = md_text.splitlines()
     nodes = []
@@ -307,9 +286,6 @@ def parse_markdown(file_path):
     )
 
 
-# =========================================================
-# DOCUMENT PARSER
-# =========================================================
 def parse_document(file_path):
     suffix = file_path.suffix.lower()
 
@@ -337,9 +313,6 @@ def parse_uploaded_files_cached(file_paths):
     return all_nodes
 
 
-# =========================================================
-# RETRIEVAL
-# =========================================================
 def normalize_text(text):
     text = text.lower()
     text = re.sub(r"[^\w\s]", " ", text)
@@ -406,21 +379,18 @@ def build_context(selected_nodes):
     return "\n\n".join(context_parts)
 
 
-# =========================================================
-# GEMINI PROMPT
-# =========================================================
 def build_prompt(question, context_text):
     return f"""
 Bạn là AI chuyên phân tích tài liệu.
 
 NHIỆM VỤ:
-- Trả lời dựa trên CONTEXT được cung cấp.
+- Chỉ trả lời dựa trên CONTEXT được cung cấp.
 - Không được bịa thông tin ngoài tài liệu.
 - Giải thích dễ hiểu cho người mới.
-- Nếu có nhiều ý, dùng bullet point.
 - Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
 - Không hiển thị SOURCE.
 - Không nhắc [SOURCE 1], [SOURCE 2], [SOURCE 3].
+- Trả lời ngắn gọn, tối đa 500 từ.
 
 FORMAT:
 - Dùng markdown.
@@ -440,55 +410,9 @@ CONTEXT:
 """
 
 
-# =========================================================
-# GEMINI
-# =========================================================
-def clean_answer(text):
-    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
-    text = re.sub(r"\s+\.", ".", text)
-    text = re.sub(r"\s+,", ",", text)
-    return text.strip()
-
-
-def extract_chunk_text(chunk):
-    chunk_text = ""
-
-    if hasattr(chunk, "parts") and chunk.parts:
-        for part in chunk.parts:
-            if hasattr(part, "text") and part.text:
-                chunk_text += part.text
-
-    if not chunk_text:
-        try:
-            chunk_text = chunk.text or ""
-        except Exception:
-            chunk_text = ""
-
-    return chunk_text
-
-
-def ask_gemini_non_stream(prompt):
-    model = genai.GenerativeModel(MODEL_NAME)
-
-    response = model.generate_content(
-        prompt,
-        generation_config={
-            "temperature": 0.35,
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
-        },
-        stream=False,
-    )
-
-    text = getattr(response, "text", "") or ""
-    return clean_answer(text)
-
-
 def ask_gemini(question, context_text):
     model = genai.GenerativeModel(MODEL_NAME)
     prompt = build_prompt(question, context_text)
-
-    response_placeholder = st.empty()
-    full_text = ""
 
     retries = 3
 
@@ -497,34 +421,17 @@ def ask_gemini(question, context_text):
             response = model.generate_content(
                 prompt,
                 generation_config={
-                    "temperature": 0.35,
+                    "temperature": 0.25,
                     "max_output_tokens": MAX_OUTPUT_TOKENS,
                 },
-                stream=True,
+                stream=False,
             )
 
-            for chunk in response:
-                chunk_text = extract_chunk_text(chunk)
+            answer = getattr(response, "text", "") or ""
+            answer = clean_answer(answer)
 
-                if chunk_text:
-                    full_text += chunk_text
-                    display_text = clean_answer(full_text)
-
-                    response_placeholder.markdown(
-                        f"""
-<div class="answer-box">
-
-{display_text}
-
-</div>
-""",
-                        unsafe_allow_html=True,
-                    )
-
-            full_text = clean_answer(full_text)
-
-            if full_text.strip():
-                return full_text
+            if answer.strip():
+                return answer
 
             raise Exception("Gemini không trả về nội dung.")
 
@@ -538,59 +445,16 @@ def ask_gemini(question, context_text):
                 continue
 
             if "429" in error_text:
-                raise Exception(
-                    "Gemini đã hết quota hoặc bị giới hạn tốc độ. Hãy chờ reset quota hoặc đổi API key."
-                )
+                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
 
             if "403" in error_text:
-                raise Exception(
-                    "API key hoặc project Gemini chưa có quyền truy cập model này."
-                )
-
-            st.warning("Stream bị lỗi. Đang chuyển sang chế độ non-stream...")
-
-            fallback_text = ask_gemini_non_stream(prompt)
-
-            if fallback_text.strip():
-                response_placeholder.markdown(
-                    f"""
-<div class="answer-box">
-
-{fallback_text}
-
-</div>
-""",
-                    unsafe_allow_html=True,
-                )
-
-                return fallback_text
+                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
 
             raise e
 
-    st.warning("Gemini vẫn quá tải sau nhiều lần thử. Đang dùng non-stream fallback...")
-
-    fallback_text = ask_gemini_non_stream(prompt)
-
-    if fallback_text.strip():
-        response_placeholder.markdown(
-            f"""
-<div class="answer-box">
-
-{fallback_text}
-
-</div>
-""",
-            unsafe_allow_html=True,
-        )
-
-        return fallback_text
-
-    raise Exception("Gemini không trả về nội dung sau nhiều lần thử.")
+    raise Exception("Gemini quá tải sau nhiều lần thử.")
 
 
-# =========================================================
-# UI STYLE
-# =========================================================
 st.markdown(
     """
 <style>
@@ -630,9 +494,6 @@ st.markdown(
 )
 
 
-# =========================================================
-# SIDEBAR
-# =========================================================
 with st.sidebar:
     st.title("📚 Lịch sử")
 
@@ -668,16 +529,9 @@ Chưa có câu hỏi nào
         )
 
 
-# =========================================================
-# HEADER
-# =========================================================
 st.title("📄 DocAnalyzer AI")
 st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
 
-
-# =========================================================
-# FILE UPLOAD
-# =========================================================
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
     type=["pdf", "md", "markdown", "txt"],
@@ -685,23 +539,14 @@ uploaded_files = st.file_uploader(
 )
 
 
-# =========================================================
-# SHOW CHAT HISTORY
-# =========================================================
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 
-# =========================================================
-# CHAT INPUT
-# =========================================================
 question = st.chat_input("Hỏi nội dung tài liệu...")
 
 
-# =========================================================
-# RUN
-# =========================================================
 if question:
     if not uploaded_files:
         st.warning("Vui lòng upload tài liệu.")
@@ -742,15 +587,24 @@ if question:
 
     with st.chat_message("assistant"):
         try:
-            answer = ask_gemini(question, context_text)
+            with st.spinner("🤖 Gemini đang trả lời..."):
+                answer = ask_gemini(question, context_text)
 
-            if answer.strip():
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                })
-            else:
-                st.error("Gemini không trả về nội dung. Hãy thử hỏi ngắn hơn.")
+            st.markdown(
+                f"""
+<div class="answer-box">
+
+{answer}
+
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+            })
 
         except Exception as e:
             st.error(f"Lỗi Gemini: {e}")
