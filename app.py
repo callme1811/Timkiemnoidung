@@ -27,7 +27,7 @@ genai.configure(
 )
 
 # =========================================================
-# STREAMLIT
+# STREAMLIT CONFIG
 # =========================================================
 st.set_page_config(
     page_title=APP_TITLE,
@@ -40,6 +40,9 @@ st.set_page_config(
 # =========================================================
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+if "question_history" not in st.session_state:
+    st.session_state.question_history = []
 
 # =========================================================
 # SAVE FILE
@@ -560,48 +563,44 @@ CONTEXT:
     return full_text
 
 # =========================================================
-# UI
+# UI STYLE
 # =========================================================
 st.markdown(
     """
 <style>
 
 .block-container{
-    max-width:1000px;
-    padding-top:30px;
+    max-width:1200px;
+    padding-top:25px;
 }
 
 .stButton button{
     width:100%;
-    height:52px;
+    height:50px;
     border-radius:14px;
-    font-size:18px;
+    font-size:16px;
     font-weight:700;
 }
 
 .stTextInput input{
     border-radius:14px;
-    height:50px;
-    font-size:18px;
-}
-
-.stFileUploader{
-    border-radius:14px;
 }
 
 .answer-box{
-    padding:25px;
+    padding:24px;
     border-radius:18px;
     background:#111827;
     border:1px solid #374151;
     margin-top:10px;
 }
 
-.user-box{
-    padding:18px;
-    border-radius:16px;
-    background:#1f2937;
-    margin-bottom:12px;
+.history-box{
+    padding:10px;
+    border-radius:12px;
+    margin-bottom:8px;
+    background:#111827;
+    border:1px solid #374151;
+    font-size:14px;
 }
 
 </style>
@@ -609,6 +608,52 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# =========================================================
+# SIDEBAR
+# =========================================================
+with st.sidebar:
+
+    st.title("📚 Lịch sử")
+
+    if st.button("🗑️ Xóa lịch sử"):
+
+        st.session_state.messages = []
+
+        st.session_state.question_history = []
+
+        st.rerun()
+
+    st.markdown("---")
+
+    if st.session_state.question_history:
+
+        for i, q in enumerate(
+            reversed(
+                st.session_state.question_history
+            ),
+            start=1
+        ):
+
+            st.markdown(
+                f"""
+<div class="history-box">
+
+{i}. {q}
+
+</div>
+""",
+                unsafe_allow_html=True
+            )
+
+    else:
+
+        st.caption(
+            "Chưa có câu hỏi nào"
+        )
+
+# =========================================================
+# HEADER
+# =========================================================
 st.title(
     "📄 DocAnalyzer AI"
 )
@@ -639,12 +684,13 @@ for msg in st.session_state.messages:
     with st.chat_message(
         msg["role"]
     ):
+
         st.markdown(
             msg["content"]
         )
 
 # =========================================================
-# USER INPUT
+# CHAT INPUT
 # =========================================================
 question = st.chat_input(
     "Hỏi nội dung tài liệu..."
@@ -668,7 +714,13 @@ if question:
         "content": question
     })
 
-    with st.chat_message("user"):
+    st.session_state.question_history.append(
+        question
+    )
+
+    with st.chat_message(
+        "user"
+    ):
 
         st.markdown(question)
 
