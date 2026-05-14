@@ -22,7 +22,7 @@ MAX_OUTPUT_TOKENS = 1200
 TOP_K = 3
 
 # GHI API KEY TRỰC TIẾP Ở ĐÂY
-GEMINI_API_KEY = "AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"
+GEMINI_API_KEY = "AIzaSyAuZ_Pxdbi1G-V_pnJgJoHbWrokf4DCDNw"
 
 
 # =========================================================
