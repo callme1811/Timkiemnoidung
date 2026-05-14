@@ -1,6 +1,5 @@
 import re
-import time
-import hashlib
+import uuid
 from pathlib import Path
 
 import streamlit as st
@@ -14,13 +13,18 @@ from pypdf import PdfReader
 APP_TITLE = "DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
+
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-MODEL_NAME = "gemini-2.5-flash"
-MAX_OUTPUT_TOKENS = 1200
-TOP_K = 3
+# =========================================================
+# GEMINI API
+# =========================================================
+GEMINI_API_KEY = "AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"
 
+genai.configure(
+    api_key=GEMINI_API_KEY
+)
 
 # =========================================================
 # STREAMLIT CONFIG
@@ -31,27 +35,6 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# =========================================================
-# GEMINI API KEY
-# =========================================================
-try:
-    GEMINI_API_KEY = st.secrets["AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"]
-except Exception:
-    st.error("""
-Thiếu GEMINI_API_KEY.
-
-Tạo file local:
-.streamlit/secrets.toml
-
-Nội dung:
-GEMINI_API_KEY="your_key_api"
-""")
-    st.stop()
-
-genai.configure(api_key=GEMINI_API_KEY)
-
-
 # =========================================================
 # SESSION STATE
 # =========================================================
@@ -61,152 +44,176 @@ if "messages" not in st.session_state:
 if "question_history" not in st.session_state:
     st.session_state.question_history = []
 
-if "last_context" not in st.session_state:
-    st.session_state.last_context = ""
-
-
 # =========================================================
-# FILE HELPERS
+# SAVE FILE
 # =========================================================
-def get_file_hash(file_bytes):
-    return hashlib.md5(file_bytes).hexdigest()
-
-
 def save_uploaded_file(uploaded_file):
-    file_bytes = uploaded_file.getvalue()
-    file_hash = get_file_hash(file_bytes)
 
-    safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
-    save_path = UPLOADS_DIR / f"{file_hash[:10]}_{safe_name}"
+    file_id = str(uuid.uuid4())[:8]
 
-    if not save_path.exists():
-        save_path.write_bytes(file_bytes)
+    save_path = (
+        UPLOADS_DIR /
+        f"{file_id}_{uploaded_file.name}"
+    )
+
+    save_path.write_bytes(
+        uploaded_file.getbuffer()
+    )
 
     return save_path
-
 
 # =========================================================
 # TEXT CHUNKING
 # =========================================================
-def split_text(text, chunk_size=1200, overlap=150):
+def split_text(
+    text,
+    chunk_size=1200
+):
+
     text = text.strip()
 
     if not text:
         return []
 
-    text = re.sub(r"\n{3,}", "\n\n", text)
     paragraphs = text.split("\n")
 
     chunks = []
+
     current_chunk = ""
 
     for para in paragraphs:
+
         para = para.strip()
 
         if not para:
             continue
 
-        if len(current_chunk) + len(para) + 1 <= chunk_size:
-            if current_chunk:
-                current_chunk += "\n" + para
-            else:
-                current_chunk = para
+        if (
+            len(current_chunk) + len(para)
+            < chunk_size
+        ):
+
+            current_chunk += (
+                "\n" + para
+            )
+
         else:
-            if current_chunk.strip():
-                chunks.append(current_chunk.strip())
 
-            if len(para) > chunk_size:
-                start = 0
+            chunks.append(
+                current_chunk.strip()
+            )
 
-                while start < len(para):
-                    end = start + chunk_size
-                    chunks.append(para[start:end].strip())
-                    start = max(end - overlap, start + 1)
-            else:
-                current_chunk = para
+            current_chunk = para
 
-    if current_chunk.strip():
-        chunks.append(current_chunk.strip())
+    if current_chunk:
+        chunks.append(
+            current_chunk.strip()
+        )
 
     return chunks
-
 
 # =========================================================
 # PDF PARSER
 # =========================================================
 def extract_pdf_text(pdf_path):
-    reader = PdfReader(str(pdf_path))
+
+    reader = PdfReader(
+        str(pdf_path)
+    )
 
     nodes = []
+
     counter = 0
 
-    for page_index, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text() or ""
-        chunks = split_text(page_text)
+    for page_index, page in enumerate(
+        reader.pages,
+        start=1
+    ):
 
-        for chunk_index, chunk in enumerate(chunks, start=1):
+        text = (
+            page.extract_text()
+            or ""
+        )
+
+        chunks = split_text(text)
+
+        for chunk in chunks:
+
             counter += 1
 
             nodes.append({
                 "node_id": str(counter).zfill(4),
                 "title": f"Page {page_index}",
-                "path": f"{pdf_path.name} > Page {page_index} > Chunk {chunk_index}",
-                "source_file": pdf_path.name,
-                "page": page_index,
-                "chunk": chunk_index,
+                "path": f"{pdf_path.name} > Page {page_index}",
                 "text": chunk,
             })
 
     return nodes
 
-
 # =========================================================
 # TXT PARSER
 # =========================================================
 def extract_txt_nodes(file_path):
+
     text = file_path.read_text(
         encoding="utf-8",
-        errors="ignore",
+        errors="ignore"
     )
 
     chunks = split_text(text)
+
     nodes = []
 
-    for i, chunk in enumerate(chunks, start=1):
+    for i, chunk in enumerate(
+        chunks,
+        start=1
+    ):
+
         nodes.append({
             "node_id": str(i).zfill(4),
             "title": file_path.name,
-            "path": f"{file_path.name} > Chunk {i}",
-            "source_file": file_path.name,
-            "page": None,
-            "chunk": i,
+            "path": file_path.name,
             "text": chunk,
         })
 
     return nodes
 
-
 # =========================================================
 # MARKDOWN PARSER
 # =========================================================
 def extract_markdown_nodes(md_text):
+
     lines = md_text.splitlines()
+
     nodes = []
+
     in_code_block = False
 
-    for i, line in enumerate(lines, start=1):
+    for i, line in enumerate(
+        lines,
+        start=1
+    ):
+
         stripped = line.strip()
 
         if stripped.startswith("```"):
-            in_code_block = not in_code_block
+
+            in_code_block = (
+                not in_code_block
+            )
+
             continue
 
         if in_code_block:
             continue
 
-        match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+        match = re.match(
+            r"^(#{1,6})\s+(.+)$",
+            stripped
+        )
 
         if match:
+
             nodes.append({
                 "title": match.group(2).strip(),
                 "level": len(match.group(1)),
@@ -215,9 +222,13 @@ def extract_markdown_nodes(md_text):
 
     return nodes, lines
 
+def add_text_to_nodes(
+    nodes,
+    lines
+):
 
-def add_text_to_nodes(nodes, lines):
     for i, node in enumerate(nodes):
+
         start = node["line_num"]
 
         end = (
@@ -226,36 +237,46 @@ def add_text_to_nodes(nodes, lines):
             else len(lines)
         )
 
-        node["start_line"] = start
-        node["end_line"] = end
-        node["text"] = "\n".join(lines[start - 1:end]).strip()
+        text = "\n".join(
+            lines[start - 1:end]
+        ).strip()
+
+        node["text"] = text
 
     return nodes
 
-
 def build_tree(flat_nodes):
+
     root = []
+
     stack = []
+
     counter = 0
 
     for node in flat_nodes:
+
         counter += 1
 
         tree_node = {
             "title": node["title"],
             "node_id": str(counter).zfill(4),
-            "line_num": node["line_num"],
-            "start_line": node.get("start_line"),
-            "end_line": node.get("end_line"),
             "text": node["text"],
             "nodes": [],
         }
 
-        while stack and stack[-1]["level"] >= node["level"]:
+        while (
+            stack
+            and stack[-1]["level"]
+            >= node["level"]
+        ):
             stack.pop()
 
         if stack:
-            stack[-1]["node"]["nodes"].append(tree_node)
+
+            stack[-1]["node"][
+                "nodes"
+            ].append(tree_node)
+
         else:
             root.append(tree_node)
 
@@ -266,134 +287,159 @@ def build_tree(flat_nodes):
 
     return root
 
+def flatten_tree(
+    nodes,
+    parent_path=""
+):
 
-def flatten_tree(nodes, parent_path="", source_file=""):
     result = []
 
     for node in nodes:
-        title = node.get("title", "")
-        path = f"{parent_path} > {title}" if parent_path else title
 
-        text_chunks = split_text(node.get("text", ""))
+        title = node.get(
+            "title",
+            ""
+        )
 
-        for chunk_index, chunk in enumerate(text_chunks, start=1):
+        path = (
+            f"{parent_path} > {title}"
+            if parent_path
+            else title
+        )
+
+        text_chunks = split_text(
+            node.get("text", "")
+        )
+
+        for chunk in text_chunks:
+
             result.append({
-                "node_id": node.get("node_id", ""),
+                "node_id": node.get(
+                    "node_id",
+                    ""
+                ),
                 "title": title,
-                "path": f"{source_file} > {path} > Chunk {chunk_index}",
-                "source_file": source_file,
-                "page": None,
-                "chunk": chunk_index,
-                "start_line": node.get("start_line"),
-                "end_line": node.get("end_line"),
+                "path": path,
                 "text": chunk,
             })
 
-        children = node.get("nodes", [])
+        children = node.get(
+            "nodes",
+            []
+        )
 
         if children:
+
             result.extend(
                 flatten_tree(
                     children,
-                    path,
-                    source_file,
+                    path
                 )
             )
 
     return result
 
-
 def parse_markdown(file_path):
+
     md_text = file_path.read_text(
         encoding="utf-8",
-        errors="ignore",
+        errors="ignore"
     )
 
-    flat_nodes, lines = extract_markdown_nodes(md_text)
+    flat_nodes, lines = (
+        extract_markdown_nodes(
+            md_text
+        )
+    )
 
     if not flat_nodes:
-        return extract_txt_nodes(file_path)
 
-    flat_nodes = add_text_to_nodes(flat_nodes, lines)
-    tree = build_tree(flat_nodes)
+        return extract_txt_nodes(
+            file_path
+        )
 
-    return flatten_tree(
-        nodes=tree,
-        source_file=file_path.name,
+    flat_nodes = add_text_to_nodes(
+        flat_nodes,
+        lines
     )
 
+    tree = build_tree(
+        flat_nodes
+    )
+
+    return flatten_tree(tree)
 
 # =========================================================
 # DOCUMENT PARSER
 # =========================================================
 def parse_document(file_path):
-    suffix = file_path.suffix.lower()
+
+    suffix = (
+        file_path.suffix.lower()
+    )
 
     if suffix == ".pdf":
-        return extract_pdf_text(file_path)
 
-    if suffix in [".md", ".markdown"]:
-        return parse_markdown(file_path)
+        return extract_pdf_text(
+            file_path
+        )
+
+    if suffix in [
+        ".md",
+        ".markdown"
+    ]:
+
+        return parse_markdown(
+            file_path
+        )
 
     if suffix == ".txt":
-        return extract_txt_nodes(file_path)
+
+        return extract_txt_nodes(
+            file_path
+        )
 
     return []
-
-
-@st.cache_data(show_spinner=False)
-def parse_uploaded_files_cached(file_paths):
-    all_nodes = []
-
-    for file_path_str in file_paths:
-        file_path = Path(file_path_str)
-        nodes = parse_document(file_path)
-        all_nodes.extend(nodes)
-
-    return all_nodes
-
 
 # =========================================================
 # RETRIEVAL
 # =========================================================
-def normalize_text(text):
-    text = text.lower()
-    text = re.sub(r"[^\w\s]", " ", text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+def keyword_score(
+    question,
+    text,
+    title=""
+):
 
+    q_words = re.findall(
+        r"\w+",
+        question.lower()
+    )
 
-def keyword_score(question, text, title=""):
-    q_words = re.findall(r"\w+", normalize_text(question))
-    content = normalize_text(f"{title} {text}")
-
-    if not q_words:
-        return 0
+    content = (
+        f"{title} {text}"
+    ).lower()
 
     score = 0
 
     for word in q_words:
+
         if word in content:
-            score += 2
-
-    question_norm = normalize_text(question)
-
-    if question_norm and question_norm in content:
-        score += 5
+            score += 1
 
     return score
 
-
-def select_relevant_nodes(question, nodes, top_k=TOP_K):
-    if not nodes:
-        return []
+def select_relevant_nodes(
+    question,
+    nodes,
+    top_k=6
+):
 
     ranked = sorted(
         nodes,
         key=lambda n: keyword_score(
             question,
-            n.get("text", ""),
-            n.get("title", ""),
+            n["text"],
+            n["title"]
         ),
         reverse=True,
     )
@@ -402,8 +448,8 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
         n for n in ranked
         if keyword_score(
             question,
-            n.get("text", ""),
-            n.get("title", ""),
+            n["text"],
+            n["title"]
         ) > 0
     ]
 
@@ -412,48 +458,69 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
 
     return selected[:top_k]
 
+def build_context(
+    selected_nodes
+):
 
-def build_context(selected_nodes):
-    context_parts = []
+    return "\n\n---\n\n".join([
 
-    for index, n in enumerate(selected_nodes, start=1):
-        context_parts.append(
-            f"""
-[SOURCE {index}]
-File: {n.get("source_file", "")}
-Vị trí: {n.get("path", "")}
+        f"""
+[Nguồn: {n["path"]}]
 
-Nội dung:
-{n.get("text", "")}
+{n["text"]}
 """
-        )
 
-    return "\n\n---\n\n".join(context_parts)
-
+        for n in selected_nodes
+    ])
 
 # =========================================================
-# GEMINI PROMPT
+# GEMINI
 # =========================================================
-def build_prompt(question, context_text):
-    return f"""
+def ask_gemini(
+    question,
+    context_text
+):
+
+    model = genai.GenerativeModel(
+        "gemini-2.5-flash"
+    )
+
+    prompt = f"""
 Bạn là AI chuyên phân tích tài liệu.
 
 NHIỆM VỤ:
-- Trả lời dựa trên CONTEXT được cung cấp.
-- Không được bịa thông tin ngoài tài liệu.
-- Giải thích dễ hiểu cho người mới.
-- Nếu có nhiều ý, dùng bullet point.
-- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
+- Trả lời dựa trên CONTEXT.
+- Không được bịa.
+- Giải thích dễ hiểu.
+- Không trả lời quá ngắn.
+- Viết như đang hướng dẫn người mới.
+- Nếu có nhiều ý hãy dùng bullet point.
 
-FORMAT:
-- Dùng markdown.
-- Có tiêu đề nhỏ.
-- Có bullet point.
-- Có phần "Ví dụ minh họa".
-- Có phần "Kết luận ngắn".
-- Nếu có thể, nhắc nguồn theo dạng [SOURCE 1], [SOURCE 2].
+NẾU LÀ KHÁI NIỆM:
+- Giải thích định nghĩa
+- Mục đích
+- Cách hoạt động
+- Ưu điểm
+- Ví dụ minh họa
 
-Nếu tài liệu không có thông tin để trả lời:
+NẾU LÀ AI / AGENT / SYSTEM:
+- Giải thích workflow
+- Thành phần liên quan
+- Cách giao tiếp
+- Ví dụ thực tế
+
+NẾU LÀ BÁO CÁO:
+- Tóm tắt ý chính
+- Insight quan trọng
+- Xu hướng
+
+BẮT BUỘC:
+- Có ví dụ minh họa
+- Có bullet point
+- Có kết luận ngắn
+- Dùng markdown đẹp
+
+Nếu tài liệu không có thông tin:
 "Tôi không tìm thấy thông tin này trong tài liệu."
 
 QUESTION:
@@ -463,143 +530,58 @@ CONTEXT:
 {context_text}
 """
 
-
-# =========================================================
-# GEMINI
-# =========================================================
-def extract_chunk_text(chunk):
-    chunk_text = ""
-
-    if hasattr(chunk, "parts") and chunk.parts:
-        for part in chunk.parts:
-            if hasattr(part, "text") and part.text:
-                chunk_text += part.text
-
-    if not chunk_text:
-        try:
-            chunk_text = chunk.text or ""
-        except Exception:
-            chunk_text = ""
-
-    return chunk_text
-
-
-def ask_gemini_non_stream(prompt):
-    model = genai.GenerativeModel(MODEL_NAME)
-
     response = model.generate_content(
         prompt,
         generation_config={
-            "temperature": 0.35,
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
+            "temperature": 0.4,
+            "max_output_tokens": 1500,
         },
-        stream=False,
+        stream=True
     )
 
-    return getattr(response, "text", "") or ""
-
-
-def ask_gemini(question, context_text):
-    model = genai.GenerativeModel(MODEL_NAME)
-    prompt = build_prompt(question, context_text)
-
-    response_placeholder = st.empty()
     full_text = ""
 
-    retries = 3
+    response_placeholder = st.empty()
 
-    for attempt in range(retries):
-        try:
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.35,
-                    "max_output_tokens": MAX_OUTPUT_TOKENS,
-                },
-                stream=True,
-            )
+    try:
 
-            for chunk in response:
-                chunk_text = extract_chunk_text(chunk)
+        for chunk in response:
 
-                if chunk_text:
-                    full_text += chunk_text
+            chunk_text = ""
 
-                    response_placeholder.markdown(
-                        f"""
+            if (
+                hasattr(chunk, "parts")
+                and chunk.parts
+            ):
+
+                for part in chunk.parts:
+
+                    if hasattr(part, "text"):
+
+                        chunk_text += part.text
+
+            if chunk_text:
+
+                full_text += chunk_text
+
+                response_placeholder.markdown(
+                    f"""
 <div class="answer-box">
 
 {full_text}
 
 </div>
 """,
-                        unsafe_allow_html=True,
-                    )
-
-            if full_text.strip():
-                return full_text
-
-            raise Exception("Gemini không trả về nội dung.")
-
-        except Exception as e:
-            error_text = str(e)
-
-            if "503" in error_text or "overloaded" in error_text.lower():
-                wait_time = 2 * (attempt + 1)
-                st.warning(f"Gemini đang quá tải. Đang thử lại sau {wait_time}s...")
-                time.sleep(wait_time)
-                continue
-
-            if "429" in error_text:
-                raise Exception(
-                    "Gemini đã hết quota hoặc bị giới hạn tốc độ. Hãy chờ reset quota hoặc đổi API key."
+                    unsafe_allow_html=True
                 )
 
-            if "403" in error_text:
-                raise Exception(
-                    "API key hoặc project Gemini chưa có quyền truy cập model này."
-                )
+    except Exception as e:
 
-            st.warning("Stream bị lỗi. Đang chuyển sang chế độ non-stream...")
-
-            fallback_text = ask_gemini_non_stream(prompt)
-
-            if fallback_text.strip():
-                response_placeholder.markdown(
-                    f"""
-<div class="answer-box">
-
-{fallback_text}
-
-</div>
-""",
-                    unsafe_allow_html=True,
-                )
-
-                return fallback_text
-
-            raise e
-
-    st.warning("Gemini vẫn quá tải sau nhiều lần thử. Đang dùng non-stream fallback...")
-
-    fallback_text = ask_gemini_non_stream(prompt)
-
-    if fallback_text.strip():
-        response_placeholder.markdown(
-            f"""
-<div class="answer-box">
-
-{fallback_text}
-
-</div>
-""",
-            unsafe_allow_html=True,
+        st.error(
+            f"Lỗi stream Gemini: {e}"
         )
 
-        return fallback_text
-
-    raise Exception("Gemini không trả về nội dung sau nhiều lần thử.")
-
+    return full_text
 
 # =========================================================
 # UI STYLE
@@ -607,6 +589,7 @@ def ask_gemini(question, context_text):
 st.markdown(
     """
 <style>
+
 .block-container{
     max-width:1200px;
     padding-top:25px;
@@ -626,7 +609,6 @@ st.markdown(
     background:#111827;
     border:1px solid #374151;
     margin-top:10px;
-    line-height:1.7;
 }
 
 .history-box{
@@ -637,129 +619,192 @@ st.markdown(
     border:1px solid #374151;
     font-size:14px;
 }
+
 </style>
 """,
-    unsafe_allow_html=True,
+    unsafe_allow_html=True
 )
-
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 with st.sidebar:
+
     st.title("📚 Lịch sử")
 
     if st.button("🗑️ Xóa lịch sử"):
+
         st.session_state.messages = []
+
         st.session_state.question_history = []
-        st.session_state.last_context = ""
-        st.cache_data.clear()
+
         st.rerun()
 
     st.markdown("---")
 
     if st.session_state.question_history:
+
         for i, q in enumerate(
-            reversed(st.session_state.question_history),
-            start=1,
+            reversed(
+                st.session_state.question_history
+            ),
+            start=1
         ):
+
             st.markdown(
                 f"""
 <div class="history-box">
+
 {i}. {q}
+
 </div>
 """,
-                unsafe_allow_html=True,
+                unsafe_allow_html=True
             )
-    else:
-        st.caption("Chưa có câu hỏi nào")
 
+    else:
+
+        st.caption(
+            "Chưa có câu hỏi nào"
+        )
 
 # =========================================================
 # HEADER
 # =========================================================
-st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
+st.title(
+    "📄 DocAnalyzer AI"
+)
 
+st.caption(
+    "Chat với PDF, Markdown và TXT bằng Gemini 2.5"
+)
 
 # =========================================================
 # FILE UPLOAD
 # =========================================================
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
-    type=["pdf", "md", "markdown", "txt"],
-    accept_multiple_files=True,
+    type=[
+        "pdf",
+        "md",
+        "markdown",
+        "txt"
+    ],
+    accept_multiple_files=True
 )
-
 
 # =========================================================
 # SHOW CHAT HISTORY
 # =========================================================
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
 
+    with st.chat_message(
+        msg["role"]
+    ):
+
+        st.markdown(
+            msg["content"]
+        )
 
 # =========================================================
 # CHAT INPUT
 # =========================================================
-question = st.chat_input("Hỏi nội dung tài liệu...")
-
+question = st.chat_input(
+    "Hỏi nội dung tài liệu..."
+)
 
 # =========================================================
 # RUN
 # =========================================================
 if question:
+
     if not uploaded_files:
-        st.warning("Vui lòng upload tài liệu.")
+
+        st.warning(
+            "Vui lòng upload tài liệu."
+        )
+
         st.stop()
 
     st.session_state.messages.append({
         "role": "user",
-        "content": question,
+        "content": question
     })
 
-    st.session_state.question_history.append(question)
-
-    with st.chat_message("user"):
-        st.markdown(question)
-
-    with st.spinner("📖 Đang đọc tài liệu..."):
-        saved_paths = []
-
-        for uploaded_file in uploaded_files:
-            file_path = save_uploaded_file(uploaded_file)
-            saved_paths.append(str(file_path))
-
-        all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
-
-    if not all_nodes:
-        st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
-        st.stop()
-
-    selected_nodes = select_relevant_nodes(
-        question=question,
-        nodes=all_nodes,
-        top_k=TOP_K,
+    st.session_state.question_history.append(
+        question
     )
 
-    context_text = build_context(selected_nodes)
-    st.session_state.last_context = context_text
+    with st.chat_message(
+        "user"
+    ):
 
-    with st.chat_message("assistant"):
+        st.markdown(question)
+
+    all_nodes = []
+
+    with st.spinner(
+        "📖 Đang đọc tài liệu..."
+    ):
+
+        for uploaded_file in uploaded_files:
+
+            file_path = save_uploaded_file(
+                uploaded_file
+            )
+
+            nodes = parse_document(
+                file_path
+            )
+
+            all_nodes.extend(nodes)
+
+    selected_nodes = (
+        select_relevant_nodes(
+            question=question,
+            nodes=all_nodes,
+            top_k=6,
+        )
+    )
+
+    context_text = build_context(
+        selected_nodes
+    )
+
+    with st.chat_message(
+        "assistant"
+    ):
+
         try:
-            answer = ask_gemini(question, context_text)
 
-            if answer.strip():
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": answer,
-                })
-            else:
-                st.error("Gemini không trả về nội dung. Hãy thử hỏi ngắn hơn.")
+            answer = ask_gemini(
+                question,
+                context_text
+            )
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer
+            })
 
         except Exception as e:
-            st.error(f"Lỗi Gemini: {e}")
 
-    with st.expander("📚 Xem context đã dùng"):
+            error_text = str(e)
+
+            if "429" in error_text:
+
+                st.error(
+                    "🚫 Gemini đã hết quota miễn phí. Hãy đổi API key hoặc chờ reset quota."
+                )
+
+            else:
+
+                st.error(
+                    f"Lỗi Gemini: {e}"
+                )
+
+    with st.expander(
+        "📚 Xem context đã dùng"
+    ):
+
         st.code(context_text)
