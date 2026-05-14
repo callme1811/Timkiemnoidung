@@ -26,7 +26,7 @@ TOP_K = 3
 # =========================================================
 # GEMINI API
 # =========================================================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_API_KEY = os.getenv("AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM")
 
 if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY. Hãy set biến môi trường GEMINI_API_KEY.")
