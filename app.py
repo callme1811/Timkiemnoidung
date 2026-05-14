@@ -543,22 +543,43 @@ CONTEXT:
 
     response_placeholder = st.empty()
 
-    for chunk in response:
+    try:
 
-        if chunk.text:
+        for chunk in response:
 
-            full_text += chunk.text
+            chunk_text = ""
 
-            response_placeholder.markdown(
-                f"""
+            if (
+                hasattr(chunk, "parts")
+                and chunk.parts
+            ):
+
+                for part in chunk.parts:
+
+                    if hasattr(part, "text"):
+
+                        chunk_text += part.text
+
+            if chunk_text:
+
+                full_text += chunk_text
+
+                response_placeholder.markdown(
+                    f"""
 <div class="answer-box">
 
 {full_text}
 
 </div>
 """,
-                unsafe_allow_html=True
-            )
+                    unsafe_allow_html=True
+                )
+
+    except Exception as e:
+
+        st.error(
+            f"Lỗi stream Gemini: {e}"
+        )
 
     return full_text
 
@@ -580,10 +601,6 @@ st.markdown(
     border-radius:14px;
     font-size:16px;
     font-weight:700;
-}
-
-.stTextInput input{
-    border-radius:14px;
 }
 
 .answer-box{
