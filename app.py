@@ -1,4 +1,3 @@
-import os
 import re
 import time
 import hashlib
@@ -24,18 +23,6 @@ TOP_K = 3
 
 
 # =========================================================
-# GEMINI API
-# =========================================================
-GEMINI_API_KEY = os.getenv("AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM")
-
-if not GEMINI_API_KEY:
-    st.error("Thiếu GEMINI_API_KEY. Hãy set biến môi trường GEMINI_API_KEY.")
-    st.stop()
-
-genai.configure(api_key=GEMINI_API_KEY)
-
-
-# =========================================================
 # STREAMLIT CONFIG
 # =========================================================
 st.set_page_config(
@@ -43,6 +30,26 @@ st.set_page_config(
     page_icon="📄",
     layout="wide",
 )
+
+
+# =========================================================
+# GEMINI API KEY
+# =========================================================
+try:
+    GEMINI_API_KEY = st.secrets["AIzaSyCcRzC2uVjqKz2dVeUXcejQ1SmGIGYHeTM"]
+except Exception:
+    st.error("""
+Thiếu GEMINI_API_KEY.
+
+Tạo file local:
+.streamlit/secrets.toml
+
+Nội dung:
+GEMINI_API_KEY="your_key_api"
+""")
+    st.stop()
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 
 # =========================================================
@@ -335,10 +342,10 @@ def parse_document(file_path):
 
 
 @st.cache_data(show_spinner=False)
-def parse_uploaded_files_cached(file_infos):
+def parse_uploaded_files_cached(file_paths):
     all_nodes = []
 
-    for file_path_str in file_infos:
+    for file_path_str in file_paths:
         file_path = Path(file_path_str)
         nodes = parse_document(file_path)
         all_nodes.extend(nodes)
@@ -425,7 +432,7 @@ Nội dung:
 
 
 # =========================================================
-# GEMINI
+# GEMINI PROMPT
 # =========================================================
 def build_prompt(question, context_text):
     return f"""
@@ -435,26 +442,10 @@ NHIỆM VỤ:
 - Trả lời dựa trên CONTEXT được cung cấp.
 - Không được bịa thông tin ngoài tài liệu.
 - Giải thích dễ hiểu cho người mới.
-- Không trả lời quá ngắn.
 - Nếu có nhiều ý, dùng bullet point.
-- Luôn ưu tiên nội dung có trong tài liệu.
-- Nếu thiếu thông tin, nói rõ phần nào tài liệu không cung cấp.
+- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
 
-NẾU LÀ KHÁI NIỆM:
-- Giải thích định nghĩa.
-- Giải thích mục đích.
-- Giải thích cách hoạt động.
-- Nêu ưu điểm.
-- Nêu hạn chế nếu tài liệu có.
-- Sau khi trả lời xong, thêm ví dụ minh họa hoàn chỉnh.
-
-NẾU LÀ AI / AGENT / SYSTEM:
-- Giải thích workflow.
-- Nêu các thành phần liên quan.
-- Giải thích cách các thành phần giao tiếp với nhau.
-- Sau khi trả lời xong, thêm ví dụ thực tế dễ hiểu.
-
-YÊU CẦU FORMAT:
+FORMAT:
 - Dùng markdown.
 - Có tiêu đề nhỏ.
 - Có bullet point.
@@ -473,6 +464,9 @@ CONTEXT:
 """
 
 
+# =========================================================
+# GEMINI
+# =========================================================
 def extract_chunk_text(chunk):
     chunk_text = ""
 
@@ -643,16 +637,6 @@ st.markdown(
     border:1px solid #374151;
     font-size:14px;
 }
-
-.source-chip{
-    display:inline-block;
-    padding:6px 10px;
-    border-radius:999px;
-    background:#1f2937;
-    border:1px solid #374151;
-    margin:4px 4px 4px 0;
-    font-size:13px;
-}
 </style>
 """,
     unsafe_allow_html=True,
@@ -695,7 +679,7 @@ with st.sidebar:
 # HEADER
 # =========================================================
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown và TXT bằng Gemini")
+st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
 
 
 # =========================================================
