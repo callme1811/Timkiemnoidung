@@ -19,7 +19,7 @@ MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
 # GHI API KEY CỦA BẠN Ở ĐÂY
-GEMINI_API_KEY = "AIzaSyAuZ_Pxdbi1G-V_pnJgJoHbWrokf4DCDNw"
+GEMINI_API_KEY = "AIzaSyBLu4I_uYuS25XaGUY5T13Q6igAB_m1T0Y"
 
 
 st.set_page_config(
