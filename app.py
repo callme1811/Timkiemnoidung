@@ -100,10 +100,7 @@ def split_text(text, chunk_size=1200, overlap=150):
             continue
 
         if len(current_chunk) + len(para) + 1 <= chunk_size:
-            if current_chunk:
-                current_chunk += "\n" + para
-            else:
-                current_chunk = para
+            current_chunk = f"{current_chunk}\n{para}" if current_chunk else para
         else:
             if current_chunk.strip():
                 chunks.append(current_chunk.strip())
@@ -285,13 +282,7 @@ def flatten_tree(nodes, parent_path="", source_file=""):
         children = node.get("nodes", [])
 
         if children:
-            result.extend(
-                flatten_tree(
-                    children,
-                    path,
-                    source_file,
-                )
-            )
+            result.extend(flatten_tree(children, path, source_file))
 
     return result
 
@@ -640,6 +631,7 @@ st.markdown(
 # SIDEBAR
 # =========================================================
 with st.sidebar:
+
     st.title("📚 Lịch sử")
 
     if st.button("🗑️ Xóa lịch sử"):
@@ -651,21 +643,30 @@ with st.sidebar:
 
     st.markdown("---")
 
-    if st.session_state.question_history:
-        for i, q in enumerate(
-            reversed(st.session_state.question_history),
-            start=1,
-        ):
+    history_list = st.session_state.get(
+        "question_history",
+        []
+    )
+
+    if len(history_list) > 0:
+        for i, q in enumerate(history_list[::-1], start=1):
             st.markdown(
                 f"""
 <div class="history-box">
-{i}. {q}
+<b>{i}.</b> {q}
 </div>
 """,
                 unsafe_allow_html=True,
             )
     else:
-        st.caption("Chưa có câu hỏi nào")
+        st.markdown(
+            """
+<div class="history-box">
+Chưa có câu hỏi nào
+</div>
+""",
+            unsafe_allow_html=True,
+        )
 
 
 # =========================================================
@@ -703,6 +704,7 @@ question = st.chat_input("Hỏi nội dung tài liệu...")
 # RUN
 # =========================================================
 if question:
+
     if not uploaded_files:
         st.warning("Vui lòng upload tài liệu.")
         st.stop()
@@ -712,7 +714,8 @@ if question:
         "content": question,
     })
 
-    st.session_state.question_history.append(question)
+    if question not in st.session_state.question_history:
+        st.session_state.question_history.append(question)
 
     with st.chat_message("user"):
         st.markdown(question)
