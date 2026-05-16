@@ -531,7 +531,7 @@ def get_default_realesrgan_path():
 
     if "windows" in system_name:
         # Đường dẫn đúng tới file .exe trên Windows
-        return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
+        return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe"
 
     # Nếu không phải Windows, trả về None hoặc báo lỗi
     raise RuntimeError("Hiện chỉ hỗ trợ Windows.")
