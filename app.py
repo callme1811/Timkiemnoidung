@@ -524,7 +524,7 @@ def get_default_realesrgan_path():
 
     if "windows" in system_name:
         # Windows: nối đúng folder + exe
-        return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe"
+        return BASE_DIR / "/workspaces/Timkiemnoidung/realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe"
 
     # Linux / Mac
     candidates = [
