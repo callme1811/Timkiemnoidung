@@ -1,11 +1,7 @@
 streamlit
 google-generativeai
 pypdf
-
-torch
-torchvision
-
-realesrgan
+python-dotenv
 Pillow
 opencv-python-headless
 numpy<2
