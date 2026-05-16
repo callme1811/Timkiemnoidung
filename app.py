@@ -3,16 +3,13 @@ import re
 import time
 import hashlib
 import subprocess
+import platform
 from pathlib import Path
 
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 
-
-# =========================
-# CONFIG
-# =========================
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -21,7 +18,7 @@ UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 GEMINI_API_KEY = st.secrets.get(
-    "AIzaSyDrSmEH4ytKt9vRbSlNIKQ3RvMT0cFUuKU",
+    "GEMINI_API_KEY",
     os.getenv("GEMINI_API_KEY", "")
 ).strip()
 
@@ -33,10 +30,6 @@ MODEL_NAME = st.secrets.get(
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-
-# =========================
-# STREAMLIT SETUP
-# =========================
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -80,17 +73,11 @@ st.markdown(
 )
 
 if not GEMINI_API_KEY:
-    st.error(
-        "Chưa có GEMINI_API_KEY. Nếu dùng Streamlit Cloud, hãy thêm key trong phần Secrets."
-    )
+    st.error("Chưa có GEMINI_API_KEY. Hãy thêm key trong Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-
-# =========================
-# SESSION STATE
-# =========================
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -101,10 +88,6 @@ if "question_history" not in st.session_state:
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
 
-
-# =========================
-# UTILS
-# =========================
 
 def clean_answer(text):
     text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
@@ -126,7 +109,6 @@ def get_file_hash(file_bytes):
 def save_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.getvalue()
     file_hash = get_file_hash(file_bytes)
-
     name = safe_filename(uploaded_file.name)
     save_path = UPLOADS_DIR / f"{file_hash[:10]}_{name}"
 
@@ -182,10 +164,6 @@ def split_text(text, chunk_size=1000, overlap=120):
 
     return chunks
 
-
-# =========================
-# DOCUMENT PARSING
-# =========================
 
 def extract_pdf_text(pdf_path):
     nodes = []
@@ -327,7 +305,6 @@ def flatten_tree(nodes, parent_path="", source_file=""):
     for node in nodes:
         title = node.get("title", "")
         path = f"{parent_path} > {title}" if parent_path else title
-
         text_chunks = split_text(node.get("text", ""))
 
         for chunk_index, chunk in enumerate(text_chunks, start=1):
@@ -365,10 +342,7 @@ def parse_markdown(file_path):
     flat_nodes = add_text_to_markdown_nodes(flat_nodes, lines)
     tree = build_tree(flat_nodes)
 
-    return flatten_tree(
-        nodes=tree,
-        source_file=file_path.name,
-    )
+    return flatten_tree(tree, source_file=file_path.name)
 
 
 def parse_document(file_path):
@@ -396,15 +370,10 @@ def parse_uploaded_files_cached(file_paths):
         if not file_path.exists():
             continue
 
-        nodes = parse_document(file_path)
-        all_nodes.extend(nodes)
+        all_nodes.extend(parse_document(file_path))
 
     return all_nodes
 
-
-# =========================
-# RETRIEVAL
-# =========================
 
 def normalize_text(text):
     text = text.lower()
@@ -476,10 +445,6 @@ def build_context(selected_nodes):
 
     return "\n\n".join(context_parts)
 
-
-# =========================
-# GEMINI
-# =========================
 
 def build_prompt(question, context_text):
     return f"""
@@ -554,9 +519,14 @@ def ask_gemini(question, context_text):
     raise RuntimeError("Gemini quá tải sau nhiều lần thử.")
 
 
-# =========================
-# SIDEBAR
-# =========================
+def get_default_realesrgan_path():
+    system_name = platform.system().lower()
+
+    if "windows" in system_name:
+        return str(BASE_DIR / "realesrgan-ncnn-vulkan.exe")
+
+    return str(BASE_DIR / "realesrgan-ncnn-vulkan")
+
 
 with st.sidebar:
     st.title("📚 Lịch sử")
@@ -593,10 +563,6 @@ Chưa có câu hỏi nào
             unsafe_allow_html=True,
         )
 
-
-# =========================
-# MAIN DOC CHAT UI
-# =========================
 
 st.title("📄 DocAnalyzer AI")
 st.caption("Chat với PDF, Markdown và TXT bằng Gemini")
@@ -642,12 +608,7 @@ if question:
         st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
         st.stop()
 
-    selected_nodes = select_relevant_nodes(
-        question=question,
-        nodes=all_nodes,
-        top_k=TOP_K,
-    )
-
+    selected_nodes = select_relevant_nodes(question, all_nodes, TOP_K)
     context_text = build_context(selected_nodes)
     st.session_state.last_context = context_text
 
@@ -679,24 +640,18 @@ if question:
         st.code(context_text)
 
 
-# =========================
-# REAL-ESRGAN UPSCALE
-# =========================
-
 st.markdown("---")
 st.header("🖼️ Làm nét / Upscale ảnh bằng Real-ESRGAN")
 st.caption(
     "Chức năng này dùng Real-ESRGAN NCNN Vulkan chạy local. "
-    "Nếu deploy Streamlit Cloud, file .exe Windows sẽ không chạy được."
+    "Trên Streamlit Cloud có thể không chạy được nếu thiếu Vulkan/GPU."
 )
 
 with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
-    default_exe = str(BASE_DIR / "realesrgan-ncnn-vulkan.exe")
-
     realesrgan_exe = st.text_input(
         "Đường dẫn file realesrgan-ncnn-vulkan",
-        value=default_exe,
-        help="Ví dụ Windows: C:/tools/realesrgan-ncnn-vulkan/realesrgan-ncnn-vulkan.exe",
+        value=get_default_realesrgan_path(),
+        help=r"Windows ví dụ: D:\Practice\Rag\TimKiemUngDung\Timkiemnoidung\realesrgan-ncnn-vulkan.exe",
     )
 
     model_name = st.selectbox(
@@ -762,6 +717,12 @@ if upscale_file is not None:
             st.error("Đường dẫn Real-ESRGAN không phải là file executable.")
             st.stop()
 
+        if platform.system().lower() != "windows":
+            try:
+                exe_path.chmod(0o755)
+            except Exception:
+                pass
+
         job_id = hashlib.md5(image_bytes + str(time.time()).encode()).hexdigest()[:10]
         job_dir = UPLOADS_DIR / f"realesrgan_job_{job_id}"
         job_dir.mkdir(exist_ok=True)
@@ -819,10 +780,7 @@ if upscale_file is not None:
             )
 
         except subprocess.TimeoutExpired:
-            st.error(
-                "Real-ESRGAN xử lý quá lâu và đã bị dừng. "
-                "Hãy thử ảnh nhỏ hơn hoặc giảm tile size."
-            )
+            st.error("Real-ESRGAN xử lý quá lâu. Hãy thử ảnh nhỏ hơn hoặc giảm tile size.")
         except Exception as e:
             st.error(f"Lỗi khi chạy Real-ESRGAN: {e}")
 else:
