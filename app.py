@@ -518,29 +518,30 @@ def ask_gemini(question, context_text):
     raise RuntimeError("Gemini quá tải sau nhiều lần thử.")
 
 
-# =========================
-# =========================
-# Hàm lấy đường dẫn Real-ESRGAN (Windows only)
-# =========================
 def get_default_realesrgan_path():
-    from pathlib import Path
     import platform
+    from pathlib import Path
 
-    system_name = platform.system().lower()
     BASE_DIR = Path(__file__).parent.resolve()
+    system_name = platform.system().lower()
 
     if "windows" in system_name:
-        exe_path = BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
-        if not exe_path.exists():
-            raise FileNotFoundError(f"Không tìm thấy file Real-ESRGAN tại: {exe_path}")
-        return exe_path
+        # Đường dẫn tới file .exe trên Windows
+        return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
 
-    raise RuntimeError("Hiện chỉ hỗ trợ Windows.")
+    # Các OS khác (Linux / Mac)
+    candidates = [
+        BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-ubuntu" / "realesrgan-ncnn-vulkan",
+        BASE_DIR / "realesrgan-ncnn-vulkan",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return path
+
+    return candidates[0]
 
 
-# =========================
-# Sidebar lịch sử
-# =========================
 with st.sidebar:
     st.title("📚 Lịch sử")
 
@@ -577,21 +578,98 @@ Chưa có câu hỏi nào
         )
 
 
-# =========================
-# Cấu hình Real-ESRGAN trên Windows
-# =========================
-st.header("🖼️ Làm nét / Upscale ảnh bằng Real-ESRGAN")
+st.title("📄 DocAnalyzer AI")
+st.caption("Chat với PDF, Markdown và TXT bằng Gemini")
 
-with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=True):
-    try:
-        realesrgan_exe = st.text_input(
-            "Đường dẫn file realesrgan-ncnn-vulkan",
-            value=str(get_default_realesrgan_path()),
-            help="Windows: đường dẫn tới realesrgan-ncnn-vulkan.exe"
-        )
-    except Exception as e:
-        st.error(f"Lỗi đường dẫn Real-ESRGAN: {e}")
+uploaded_files = st.file_uploader(
+    "📂 Tải tài liệu lên",
+    type=["pdf", "md", "markdown", "txt"],
+    accept_multiple_files=True,
+)
+
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+question = st.chat_input("Hỏi nội dung tài liệu...")
+
+if question:
+    if not uploaded_files:
+        st.warning("Vui lòng upload tài liệu.")
         st.stop()
+
+    st.session_state.messages.append({
+        "role": "user",
+        "content": question,
+    })
+
+    if question not in st.session_state.question_history:
+        st.session_state.question_history.append(question)
+
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.spinner("📖 Đang đọc tài liệu..."):
+        saved_paths = []
+
+        for uploaded_file in uploaded_files:
+            file_path = save_uploaded_file(uploaded_file)
+            saved_paths.append(str(file_path))
+
+        all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
+
+    if not all_nodes:
+        st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
+        st.stop()
+
+    selected_nodes = select_relevant_nodes(question, all_nodes, TOP_K)
+    context_text = build_context(selected_nodes)
+    st.session_state.last_context = context_text
+
+    with st.chat_message("assistant"):
+        try:
+            with st.spinner("🤖 Gemini đang trả lời..."):
+                answer = ask_gemini(question, context_text)
+
+            st.markdown(
+                f"""
+<div class="answer-box">
+
+{answer}
+
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": answer,
+            })
+
+        except Exception as e:
+            st.error(f"Lỗi Gemini: {e}")
+
+    with st.expander("📚 Xem context đã dùng"):
+        st.code(context_text)
+
+
+st.markdown("---")
+st.header("🖼️ Làm nét / Upscale ảnh bằng Real-ESRGAN")
+st.caption(
+    "Chức năng này dùng Real-ESRGAN NCNN Vulkan chạy local. "
+    "Trên Streamlit Cloud có thể không chạy được nếu thiếu Vulkan/GPU."
+)
+
+with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
+    realesrgan_exe = st.text_input(
+        "Đường dẫn file realesrgan-ncnn-vulkan",
+        value=get_default_realesrgan_path(),
+        help=(
+            "Windows: đường dẫn tới realesrgan-ncnn-vulkan.exe. "
+            "Linux/Streamlit Cloud: đường dẫn tới file realesrgan-ncnn-vulkan."
+        ),
+    )
 
     model_name = st.selectbox(
         "Model",
@@ -638,29 +716,42 @@ upscale_file = st.file_uploader(
 
 col_preview_1, col_preview_2 = st.columns(2)
 
-if upscale_file:
+if upscale_file is not None:
     image_bytes = upscale_file.getvalue()
-    safe_image_name = re.sub(r"[^a-zA-Z0-9_.\-() ]", "_", upscale_file.name)
+    safe_image_name = safe_filename(upscale_file.name)
 
     with col_preview_1:
         st.subheader("Ảnh gốc")
         st.image(image_bytes, use_container_width=True)
 
-    if st.button("🚀 Làm nét ảnh bằng Real-ESRGAN"):
+    run_upscale = st.button("🚀 Làm nét ảnh bằng Real-ESRGAN")
+
+    if run_upscale:
         exe_path = Path(realesrgan_exe.strip().strip('"'))
 
         if show_debug:
+            st.write("BASE_DIR:", BASE_DIR)
             st.write("Real-ESRGAN path:", exe_path)
             st.write("Exists:", exe_path.exists())
             st.write("Is file:", exe_path.is_file())
             st.write("Platform:", platform.system())
 
-        if not exe_path.exists() or not exe_path.is_file():
-            st.error("Không tìm thấy file Real-ESRGAN hoặc không phải file executable.")
+        if not exe_path.exists():
+            st.error("Không tìm thấy file Real-ESRGAN. Hãy kiểm tra lại đường dẫn hoặc đã push file lên GitHub chưa.")
             st.stop()
 
+        if not exe_path.is_file():
+            st.error("Đường dẫn Real-ESRGAN không phải là file executable.")
+            st.stop()
+
+        if platform.system().lower() != "windows":
+            try:
+                exe_path.chmod(0o755)
+            except Exception:
+                pass
+
         job_id = hashlib.md5(image_bytes + str(time.time()).encode()).hexdigest()[:10]
-        job_dir = Path("uploads") / f"realesrgan_job_{job_id}"
+        job_dir = UPLOADS_DIR / f"realesrgan_job_{job_id}"
         job_dir.mkdir(exist_ok=True)
 
         input_path = job_dir / safe_image_name
@@ -674,10 +765,10 @@ if upscale_file:
             "-o", str(output_path),
             "-n", model_name,
             "-s", str(scale),
-            "-f", output_format
+            "-f", output_format,
         ]
 
-        if tile_size > 0:
+        if tile_size and tile_size > 0:
             cmd.extend(["-t", str(tile_size)])
 
         try:
@@ -687,7 +778,7 @@ if upscale_file:
                     cwd=str(exe_path.parent),
                     capture_output=True,
                     text=True,
-                    timeout=600
+                    timeout=600,
                 )
 
             if completed.returncode != 0:
@@ -712,7 +803,7 @@ if upscale_file:
                 "⬇️ Tải ảnh đã làm nét",
                 data=output_bytes,
                 file_name=output_path.name,
-                mime=mime_type
+                mime=mime_type,
             )
 
         except subprocess.TimeoutExpired:
