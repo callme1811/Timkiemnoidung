@@ -8,14 +8,11 @@ from pathlib import Path
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-from dotenv import load_dotenv
 
 
 # =========================
 # CONFIG
 # =========================
-
-load_dotenv()
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -23,9 +20,16 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-GEMINI_API_KEY = os.getenv("AIzaSyDrSmEH4ytKt9vRbSlNIKQ3RvMT0cFUuKU", "").strip()
+GEMINI_API_KEY = st.secrets.get(
+    "AIzaSyDrSmEH4ytKt9vRbSlNIKQ3RvMT0cFUuKU",
+    os.getenv("GEMINI_API_KEY", "")
+).strip()
 
-MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+MODEL_NAME = st.secrets.get(
+    "GEMINI_MODEL",
+    os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+)
+
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
@@ -47,7 +51,6 @@ st.markdown(
     max-width:1200px;
     padding-top:25px;
 }
-
 .stButton button{
     width:100%;
     height:50px;
@@ -55,7 +58,6 @@ st.markdown(
     font-size:16px;
     font-weight:700;
 }
-
 .answer-box{
     padding:24px;
     border-radius:18px;
@@ -64,7 +66,6 @@ st.markdown(
     margin-top:10px;
     line-height:1.7;
 }
-
 .history-box{
     padding:10px;
     border-radius:12px;
@@ -78,11 +79,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 if not GEMINI_API_KEY:
     st.error(
-        "Bạn chưa cấu hình GEMINI_API_KEY. "
-        "Hãy tạo file .env và thêm GEMINI_API_KEY=your_key_here"
+        "Chưa có GEMINI_API_KEY. Nếu dùng Streamlit Cloud, hãy thêm key trong phần Secrets."
     )
     st.stop()
 
@@ -107,24 +106,24 @@ if "last_context" not in st.session_state:
 # UTILS
 # =========================
 
-def clean_answer(text: str) -> str:
+def clean_answer(text):
     text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
     text = re.sub(r"\s+\.", ".", text)
     text = re.sub(r"\s+,", ",", text)
     return text.strip()
 
 
-def safe_filename(filename: str) -> str:
+def safe_filename(filename):
     filename = filename.replace("/", "_").replace("\\", "_")
     filename = re.sub(r"[^a-zA-Z0-9_.\-() ]", "_", filename)
     return filename
 
 
-def get_file_hash(file_bytes: bytes) -> str:
+def get_file_hash(file_bytes):
     return hashlib.md5(file_bytes).hexdigest()
 
 
-def save_uploaded_file(uploaded_file) -> Path:
+def save_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.getvalue()
     file_hash = get_file_hash(file_bytes)
 
@@ -137,7 +136,7 @@ def save_uploaded_file(uploaded_file) -> Path:
     return save_path
 
 
-def split_text(text: str, chunk_size: int = 1000, overlap: int = 120) -> list[str]:
+def split_text(text, chunk_size=1000, overlap=120):
     text = text.strip()
 
     if not text:
@@ -188,7 +187,7 @@ def split_text(text: str, chunk_size: int = 1000, overlap: int = 120) -> list[st
 # DOCUMENT PARSING
 # =========================
 
-def extract_pdf_text(pdf_path: Path) -> list[dict]:
+def extract_pdf_text(pdf_path):
     nodes = []
     counter = 0
 
@@ -221,7 +220,7 @@ def extract_pdf_text(pdf_path: Path) -> list[dict]:
     return nodes
 
 
-def extract_txt_nodes(file_path: Path) -> list[dict]:
+def extract_txt_nodes(file_path):
     try:
         text = file_path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -244,7 +243,7 @@ def extract_txt_nodes(file_path: Path) -> list[dict]:
     return nodes
 
 
-def extract_markdown_headers(md_text: str):
+def extract_markdown_headers(md_text):
     lines = md_text.splitlines()
     nodes = []
     in_code_block = False
@@ -271,7 +270,7 @@ def extract_markdown_headers(md_text: str):
     return nodes, lines
 
 
-def add_text_to_markdown_nodes(nodes: list[dict], lines: list[str]) -> list[dict]:
+def add_text_to_markdown_nodes(nodes, lines):
     for i, node in enumerate(nodes):
         start = node["line_num"]
 
@@ -288,7 +287,7 @@ def add_text_to_markdown_nodes(nodes: list[dict], lines: list[str]) -> list[dict
     return nodes
 
 
-def build_tree(flat_nodes: list[dict]) -> list[dict]:
+def build_tree(flat_nodes):
     root = []
     stack = []
     counter = 0
@@ -322,7 +321,7 @@ def build_tree(flat_nodes: list[dict]) -> list[dict]:
     return root
 
 
-def flatten_tree(nodes: list[dict], parent_path: str = "", source_file: str = "") -> list[dict]:
+def flatten_tree(nodes, parent_path="", source_file=""):
     result = []
 
     for node in nodes:
@@ -352,7 +351,7 @@ def flatten_tree(nodes: list[dict], parent_path: str = "", source_file: str = ""
     return result
 
 
-def parse_markdown(file_path: Path) -> list[dict]:
+def parse_markdown(file_path):
     try:
         md_text = file_path.read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -372,7 +371,7 @@ def parse_markdown(file_path: Path) -> list[dict]:
     )
 
 
-def parse_document(file_path: Path) -> list[dict]:
+def parse_document(file_path):
     suffix = file_path.suffix.lower()
 
     if suffix == ".pdf":
@@ -388,7 +387,7 @@ def parse_document(file_path: Path) -> list[dict]:
 
 
 @st.cache_data(show_spinner=False)
-def parse_uploaded_files_cached(file_paths: tuple[str, ...]) -> list[dict]:
+def parse_uploaded_files_cached(file_paths):
     all_nodes = []
 
     for file_path_str in file_paths:
@@ -404,17 +403,17 @@ def parse_uploaded_files_cached(file_paths: tuple[str, ...]) -> list[dict]:
 
 
 # =========================
-# SIMPLE RETRIEVAL
+# RETRIEVAL
 # =========================
 
-def normalize_text(text: str) -> str:
+def normalize_text(text):
     text = text.lower()
     text = re.sub(r"[^\w\s]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def keyword_score(question: str, text: str, title: str = "") -> int:
+def keyword_score(question, text, title=""):
     q_words = re.findall(r"\w+", normalize_text(question))
     content = normalize_text(f"{title} {text}")
 
@@ -435,7 +434,7 @@ def keyword_score(question: str, text: str, title: str = "") -> int:
     return score
 
 
-def select_relevant_nodes(question: str, nodes: list[dict], top_k: int = TOP_K) -> list[dict]:
+def select_relevant_nodes(question, nodes, top_k=TOP_K):
     if not nodes:
         return []
 
@@ -464,7 +463,7 @@ def select_relevant_nodes(question: str, nodes: list[dict], top_k: int = TOP_K) 
     return selected[:top_k]
 
 
-def build_context(selected_nodes: list[dict]) -> str:
+def build_context(selected_nodes):
     context_parts = []
 
     for index, node in enumerate(selected_nodes, start=1):
@@ -482,7 +481,7 @@ def build_context(selected_nodes: list[dict]) -> str:
 # GEMINI
 # =========================
 
-def build_prompt(question: str, context_text: str) -> str:
+def build_prompt(question, context_text):
     return f"""
 Bạn là AI chuyên phân tích tài liệu.
 
@@ -510,7 +509,7 @@ CONTEXT:
 """
 
 
-def ask_gemini(question: str, context_text: str) -> str:
+def ask_gemini(question, context_text):
     model = genai.GenerativeModel(MODEL_NAME)
     prompt = build_prompt(question, context_text)
 
@@ -688,7 +687,7 @@ st.markdown("---")
 st.header("🖼️ Làm nét / Upscale ảnh bằng Real-ESRGAN")
 st.caption(
     "Chức năng này dùng Real-ESRGAN NCNN Vulkan chạy local. "
-    "Không ảnh hưởng chức năng phân tích tài liệu."
+    "Nếu deploy Streamlit Cloud, file .exe Windows sẽ không chạy được."
 )
 
 with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
@@ -722,7 +721,6 @@ with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
         "Tỉ lệ upscale",
         options=[2, 3, 4],
         index=2,
-        help="Một số model mặc định x4. Nếu lỗi, hãy để scale = 4.",
     )
 
     tile_size = st.number_input(
@@ -731,7 +729,7 @@ with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
         max_value=1024,
         value=0,
         step=32,
-        help="0 = tự động. Giảm nếu thiếu VRAM hoặc ảnh quá lớn.",
+        help="0 = tự động.",
     )
 
 upscale_file = st.file_uploader(
