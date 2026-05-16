@@ -1,6 +1,11 @@
 streamlit
 google-generativeai
 pypdf
-sentence-transformers
-faiss-cpu
-numpy
+
+torch
+torchvision
+
+realesrgan
+Pillow
+opencv-python-headless
+numpy<2
