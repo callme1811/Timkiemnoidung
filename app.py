@@ -651,7 +651,7 @@ with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
     realesrgan_exe = st.text_input(
         "Đường dẫn file realesrgan-ncnn-vulkan",
         value=get_default_realesrgan_path(),
-        help=r"Windows ví dụ: realesrgan-ncnn-vulkan-v0.2.0-ubuntu/realesrgan-ncnn-vulkan.exe",
+        help=r"Windows ví dụ: realesrgan-ncnn-vulkan-v0.2.0-ubuntu.exe",
     )
 
     model_name = st.selectbox(
