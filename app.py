@@ -522,15 +522,15 @@ def ask_gemini(question, context_text):
 # Hàm lấy đường dẫn Real-ESRGAN trên Windows
 # =========================
 
-from pathlib import Path
-import platform
-
 def get_default_realesrgan_path():
+    import platform
+    from pathlib import Path
+
     BASE_DIR = Path(__file__).parent.resolve()
     system_name = platform.system().lower()
 
     if "windows" in system_name:
-        # Đường dẫn tới file .exe trên Windows
+        # Đường dẫn đúng tới file .exe trên Windows
         return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
 
     # Nếu không phải Windows, trả về None hoặc báo lỗi
