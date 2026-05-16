@@ -518,10 +518,14 @@ def ask_gemini(question, context_text):
     raise RuntimeError("Gemini quá tải sau nhiều lần thử.")
 
 
-def get_default_realesrgan_path():
-    import platform
-    from pathlib import Path
+# =========================
+# Hàm lấy đường dẫn Real-ESRGAN trên Windows
+# =========================
 
+from pathlib import Path
+import platform
+
+def get_default_realesrgan_path():
     BASE_DIR = Path(__file__).parent.resolve()
     system_name = platform.system().lower()
 
@@ -529,17 +533,8 @@ def get_default_realesrgan_path():
         # Đường dẫn tới file .exe trên Windows
         return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
 
-    # Các OS khác (Linux / Mac)
-    candidates = [
-        BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-ubuntu" / "realesrgan-ncnn-vulkan",
-        BASE_DIR / "realesrgan-ncnn-vulkan",
-    ]
-
-    for path in candidates:
-        if path.exists():
-            return path
-
-    return candidates[0]
+    # Nếu không phải Windows, trả về None hoặc báo lỗi
+    raise RuntimeError("Hiện chỉ hỗ trợ Windows.")
 
 
 with st.sidebar:
