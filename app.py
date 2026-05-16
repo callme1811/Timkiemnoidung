@@ -17,16 +17,6 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-GEMINI_API_KEY = st.secrets.get(
-    "GEMINI_API_KEY",
-    os.getenv("GEMINI_API_KEY", "")
-).strip()
-
-MODEL_NAME = st.secrets.get(
-    "GEMINI_MODEL",
-    os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-)
-
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
@@ -36,6 +26,18 @@ st.set_page_config(
     page_icon="📄",
     layout="wide",
 )
+
+
+def get_secret_or_env(key, default=""):
+    try:
+        return st.secrets.get(key, os.getenv(key, default))
+    except Exception:
+        return os.getenv(key, default)
+
+
+GEMINI_API_KEY = get_secret_or_env("GEMINI_API_KEY", "").strip()
+MODEL_NAME = get_secret_or_env("GEMINI_MODEL", "gemini-2.5-flash")
+
 
 st.markdown(
     """
@@ -71,6 +73,7 @@ st.markdown(
 """,
     unsafe_allow_html=True,
 )
+
 
 if not GEMINI_API_KEY:
     st.error("Chưa có GEMINI_API_KEY. Hãy thêm key trong Streamlit Secrets.")
@@ -184,7 +187,6 @@ def extract_pdf_text(pdf_path):
 
         for chunk_index, chunk in enumerate(chunks, start=1):
             counter += 1
-
             nodes.append({
                 "node_id": str(counter).zfill(4),
                 "title": f"Page {page_index}",
@@ -367,10 +369,8 @@ def parse_uploaded_files_cached(file_paths):
     for file_path_str in file_paths:
         file_path = Path(file_path_str)
 
-        if not file_path.exists():
-            continue
-
-        all_nodes.extend(parse_document(file_path))
+        if file_path.exists():
+            all_nodes.extend(parse_document(file_path))
 
     return all_nodes
 
@@ -436,11 +436,10 @@ def build_context(selected_nodes):
     context_parts = []
 
     for index, node in enumerate(selected_nodes, start=1):
-        path = node.get("path", "")
-        text = node.get("text", "")
-
         context_parts.append(
-            f"[ĐOẠN {index}]\nNguồn: {path}\nNội dung:\n{text}"
+            f"[ĐOẠN {index}]\n"
+            f"Nguồn: {node.get('path', '')}\n"
+            f"Nội dung:\n{node.get('text', '')}"
         )
 
     return "\n\n".join(context_parts)
@@ -525,7 +524,16 @@ def get_default_realesrgan_path():
     if "windows" in system_name:
         return str(BASE_DIR / "realesrgan-ncnn-vulkan.exe")
 
-    return str(BASE_DIR / "realesrgan-ncnn-vulkan")
+    candidates = [
+        BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-ubuntu" / "realesrgan-ncnn-vulkan",
+        BASE_DIR / "realesrgan-ncnn-vulkan",
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return str(path)
+
+    return str(candidates[0])
 
 
 with st.sidebar:
@@ -651,7 +659,10 @@ with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
     realesrgan_exe = st.text_input(
         "Đường dẫn file realesrgan-ncnn-vulkan",
         value=get_default_realesrgan_path(),
-        help=r"Windows ví dụ: realesrgan-ncnn-vulkan-v0.2.0-ubuntu.exe",
+        help=(
+            "Windows: đường dẫn tới realesrgan-ncnn-vulkan.exe. "
+            "Linux/Streamlit Cloud: đường dẫn tới file realesrgan-ncnn-vulkan."
+        ),
     )
 
     model_name = st.selectbox(
@@ -687,6 +698,9 @@ with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
         help="0 = tự động.",
     )
 
+    show_debug = st.checkbox("Hiện debug Real-ESRGAN", value=False)
+
+
 upscale_file = st.file_uploader(
     "📤 Tải ảnh cần làm nét",
     type=["jpg", "jpeg", "png", "webp"],
@@ -709,8 +723,15 @@ if upscale_file is not None:
     if run_upscale:
         exe_path = Path(realesrgan_exe.strip().strip('"'))
 
+        if show_debug:
+            st.write("BASE_DIR:", BASE_DIR)
+            st.write("Real-ESRGAN path:", exe_path)
+            st.write("Exists:", exe_path.exists())
+            st.write("Is file:", exe_path.is_file())
+            st.write("Platform:", platform.system())
+
         if not exe_path.exists():
-            st.error("Không tìm thấy file Real-ESRGAN. Hãy kiểm tra lại đường dẫn.")
+            st.error("Không tìm thấy file Real-ESRGAN. Hãy kiểm tra lại đường dẫn hoặc đã push file lên GitHub chưa.")
             st.stop()
 
         if not exe_path.is_file():
