@@ -520,13 +520,16 @@ def ask_gemini(question, context_text):
 
 def get_default_realesrgan_path():
     import platform
+    from pathlib import Path
+
+    BASE_DIR = Path(__file__).parent.resolve()
     system_name = platform.system().lower()
 
     if "windows" in system_name:
-        # Windows: nối đúng folder + exe
-        return BASE_DIR / "/workspaces/Timkiemnoidung/realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe"
+        # Đường dẫn tới file .exe trên Windows
+        return BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows" / "realesrgan-ncnn-vulkan.exe"
 
-    # Linux / Mac
+    # Các OS khác (Linux / Mac)
     candidates = [
         BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-ubuntu" / "realesrgan-ncnn-vulkan",
         BASE_DIR / "realesrgan-ncnn-vulkan",
