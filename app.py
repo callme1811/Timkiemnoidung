@@ -524,7 +524,7 @@ def get_default_realesrgan_path():
     # Nếu Windows, trả về .exe
     if "windows" in system_name:
         # Cập nhật tên folder Windows của bạn
-        return str(BASE_DIR / "/workspaces/Timkiemnoidung/realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe")
+        return str(BASE_DIR / "realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan-v0.2.0-windows/realesrgan-ncnn-vulkan.exe")
 
     # Các OS khác (Linux/Mac)
     candidates = [
