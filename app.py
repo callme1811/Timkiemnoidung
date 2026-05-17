@@ -8,6 +8,7 @@ import google.generativeai as genai
 from pypdf import PdfReader
 
 
+
 APP_TITLE = "DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -19,7 +20,7 @@ MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
 # GHI API KEY CỦA BẠN Ở ĐÂY
-GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
+#GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
 
 
 st.set_page_config(
@@ -28,10 +29,14 @@ st.set_page_config(
     layout="wide",
 )
 
-if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-    st.error("Bạn chưa điền GEMINI_API_KEY trong code.")
+# Lấy key từ Streamlit Secrets
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    st.error("API key không tìm thấy trong secrets. Vui lòng thêm vào Secrets.")
     st.stop()
 
+# Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
 
