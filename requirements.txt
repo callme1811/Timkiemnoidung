@@ -1,10 +1,8 @@
-streamlit>=1.20
-google-generativeai
-pypdf
-Pillow
-opencv-python-headless
-numpy<2
-torch>=2.1
-basicsr
+streamlit
+pillow
+pymupdf
 realesrgan
-# facexlib  # chỉ thêm nếu cần face enhancement
+opencv-python
+basicsr
+facexlib
+gfpgan
