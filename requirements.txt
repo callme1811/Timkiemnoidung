@@ -2,7 +2,7 @@ streamlit
 pillow
 pymupdf
 realesrgan
-opencv-python
 basicsr
 facexlib
 gfpgan
+opencv-python-headless
