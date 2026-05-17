@@ -20,7 +20,7 @@ TOP_K = 3
 
 # LẤY GEMINI API KEY TỪ STREAMLIT SECRETS
 try:
-    GEMINI_API_KEY = st.secrets["gemini"]["api_key"]
+    GEMINI_API_KEY = st.secrets["gemini"]["AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"]
 except Exception:
     GEMINI_API_KEY = None
 
