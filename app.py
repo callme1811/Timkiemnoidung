@@ -8,7 +8,7 @@ import google.generativeai as genai
 from pypdf import PdfReader
 from PIL import Image
 import subprocess
-
+import sys
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -560,11 +560,12 @@ if uploaded_ecg:
     output_path = OUTPUT_DIR / f"enhanced_{uploaded_ecg.name}"
 
     cmd = [
-        "python", "Real-ESRGAN/inference_realesrgan.py",
-        "-n", "RealESRGAN_x4plus",
-        "-i", str(file_path),
-        "-o", str(output_path),
-        "--outscale", "4"
+    sys.executable,
+    "Real-ESRGAN/inference_realesrgan.py",
+    "-n", "RealESRGAN_x4plus",
+    "-i", str(file_path),
+    "-o", str(output_path),
+    "--outscale", "4"
     ]
 
     try:
