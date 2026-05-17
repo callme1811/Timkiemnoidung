@@ -1,14 +1,15 @@
+import os
 import re
 import time
 import hashlib
+import subprocess
+import platform
 from pathlib import Path
 
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-from PIL import Image
-import subprocess
-import sys
+
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -16,12 +17,8 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
-
-# GHI API KEY CỦA BẠN Ở ĐÂY
-GEMINI_API_KEY = "YOUR_API_KEY"
 
 
 st.set_page_config(
@@ -30,8 +27,56 @@ st.set_page_config(
     layout="wide",
 )
 
-if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
-    st.error("Bạn chưa điền GEMINI_API_KEY trong code.")
+
+def get_secret_or_env(key, default=""):
+    try:
+        return st.secrets.get(key, os.getenv(key, default))
+    except Exception:
+        return os.getenv(key, default)
+
+
+GEMINI_API_KEY = get_secret_or_env("GEMINI_API_KEY", "").strip()
+MODEL_NAME = get_secret_or_env("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+st.markdown(
+    """
+<style>
+.block-container{
+    max-width:1200px;
+    padding-top:25px;
+}
+.stButton button{
+    width:100%;
+    height:50px;
+    border-radius:14px;
+    font-size:16px;
+    font-weight:700;
+}
+.answer-box{
+    padding:24px;
+    border-radius:18px;
+    background:#111827;
+    border:1px solid #374151;
+    margin-top:10px;
+    line-height:1.7;
+}
+.history-box{
+    padding:10px;
+    border-radius:12px;
+    margin-bottom:8px;
+    background:#111827;
+    border:1px solid #374151;
+    font-size:14px;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+
+if not GEMINI_API_KEY:
+    st.error("Chưa có GEMINI_API_KEY. Hãy thêm key trong Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -54,6 +99,12 @@ def clean_answer(text):
     return text.strip()
 
 
+def safe_filename(filename):
+    filename = filename.replace("/", "_").replace("\\", "_")
+    filename = re.sub(r"[^a-zA-Z0-9_.\-() ]", "_", filename)
+    return filename
+
+
 def get_file_hash(file_bytes):
     return hashlib.md5(file_bytes).hexdigest()
 
@@ -61,9 +112,8 @@ def get_file_hash(file_bytes):
 def save_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.getvalue()
     file_hash = get_file_hash(file_bytes)
-
-    safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
-    save_path = UPLOADS_DIR / f"{file_hash[:10]}_{safe_name}"
+    name = safe_filename(uploaded_file.name)
+    save_path = UPLOADS_DIR / f"{file_hash[:10]}_{name}"
 
     if not save_path.exists():
         save_path.write_bytes(file_bytes)
@@ -100,7 +150,14 @@ def split_text(text, chunk_size=1000, overlap=120):
 
                 while start < len(para):
                     end = start + chunk_size
-                    chunks.append(para[start:end].strip())
+                    chunk = para[start:end].strip()
+
+                    if chunk:
+                        chunks.append(chunk)
+
+                    if end >= len(para):
+                        break
+
                     start = max(end - overlap, start + 1)
             else:
                 current_chunk = para
@@ -112,18 +169,24 @@ def split_text(text, chunk_size=1000, overlap=120):
 
 
 def extract_pdf_text(pdf_path):
-    reader = PdfReader(str(pdf_path))
-
     nodes = []
     counter = 0
 
+    try:
+        reader = PdfReader(str(pdf_path))
+    except Exception:
+        return []
+
     for page_index, page in enumerate(reader.pages, start=1):
-        page_text = page.extract_text() or ""
+        try:
+            page_text = page.extract_text() or ""
+        except Exception:
+            page_text = ""
+
         chunks = split_text(page_text)
 
         for chunk_index, chunk in enumerate(chunks, start=1):
             counter += 1
-
             nodes.append({
                 "node_id": str(counter).zfill(4),
                 "title": f"Page {page_index}",
@@ -138,10 +201,10 @@ def extract_pdf_text(pdf_path):
 
 
 def extract_txt_nodes(file_path):
-    text = file_path.read_text(
-        encoding="utf-8",
-        errors="ignore",
-    )
+    try:
+        text = file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
 
     chunks = split_text(text)
     nodes = []
@@ -160,7 +223,7 @@ def extract_txt_nodes(file_path):
     return nodes
 
 
-def extract_markdown_nodes(md_text):
+def extract_markdown_headers(md_text):
     lines = md_text.splitlines()
     nodes = []
     in_code_block = False
@@ -187,7 +250,7 @@ def extract_markdown_nodes(md_text):
     return nodes, lines
 
 
-def add_text_to_nodes(nodes, lines):
+def add_text_to_markdown_nodes(nodes, lines):
     for i, node in enumerate(nodes):
         start = node["line_num"]
 
@@ -218,7 +281,7 @@ def build_tree(flat_nodes):
             "line_num": node["line_num"],
             "start_line": node.get("start_line"),
             "end_line": node.get("end_line"),
-            "text": node["text"],
+            "text": node.get("text", ""),
             "nodes": [],
         }
 
@@ -244,7 +307,6 @@ def flatten_tree(nodes, parent_path="", source_file=""):
     for node in nodes:
         title = node.get("title", "")
         path = f"{parent_path} > {title}" if parent_path else title
-
         text_chunks = split_text(node.get("text", ""))
 
         for chunk_index, chunk in enumerate(text_chunks, start=1):
@@ -269,23 +331,20 @@ def flatten_tree(nodes, parent_path="", source_file=""):
 
 
 def parse_markdown(file_path):
-    md_text = file_path.read_text(
-        encoding="utf-8",
-        errors="ignore",
-    )
+    try:
+        md_text = file_path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
 
-    flat_nodes, lines = extract_markdown_nodes(md_text)
+    flat_nodes, lines = extract_markdown_headers(md_text)
 
     if not flat_nodes:
         return extract_txt_nodes(file_path)
 
-    flat_nodes = add_text_to_nodes(flat_nodes, lines)
+    flat_nodes = add_text_to_markdown_nodes(flat_nodes, lines)
     tree = build_tree(flat_nodes)
 
-    return flatten_tree(
-        nodes=tree,
-        source_file=file_path.name,
-    )
+    return flatten_tree(tree, source_file=file_path.name)
 
 
 def parse_document(file_path):
@@ -309,8 +368,9 @@ def parse_uploaded_files_cached(file_paths):
 
     for file_path_str in file_paths:
         file_path = Path(file_path_str)
-        nodes = parse_document(file_path)
-        all_nodes.extend(nodes)
+
+        if file_path.exists():
+            all_nodes.extend(parse_document(file_path))
 
     return all_nodes
 
@@ -375,8 +435,12 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
 def build_context(selected_nodes):
     context_parts = []
 
-    for n in selected_nodes:
-        context_parts.append(n.get("text", ""))
+    for index, node in enumerate(selected_nodes, start=1):
+        context_parts.append(
+            f"[ĐOẠN {index}]\n"
+            f"Nguồn: {node.get('path', '')}\n"
+            f"Nội dung:\n{node.get('text', '')}"
+        )
 
     return "\n\n".join(context_parts)
 
@@ -388,10 +452,10 @@ Bạn là AI chuyên phân tích tài liệu.
 NHIỆM VỤ:
 - Chỉ trả lời dựa trên CONTEXT được cung cấp.
 - Không được bịa thông tin ngoài tài liệu.
+- Nếu thiếu thông tin, nói rõ: "Tôi không tìm thấy thông tin này trong tài liệu."
 - Giải thích dễ hiểu cho người mới.
-- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
-- Không hiển thị SOURCE.
-- Không nhắc [SOURCE 1], [SOURCE 2], [SOURCE 3].
+- Không nhắc tên SOURCE.
+- Không hiển thị [SOURCE 1], [SOURCE 2], [SOURCE 3].
 - Trả lời ngắn gọn, tối đa 500 từ.
 
 FORMAT:
@@ -400,9 +464,6 @@ FORMAT:
 - Có bullet point.
 - Có phần "Ví dụ minh họa".
 - Có phần "Kết luận ngắn".
-
-Nếu tài liệu không có thông tin để trả lời:
-"Tôi không tìm thấy thông tin này trong tài liệu."
 
 QUESTION:
 {question}
@@ -432,10 +493,10 @@ def ask_gemini(question, context_text):
             answer = getattr(response, "text", "") or ""
             answer = clean_answer(answer)
 
-            if answer.strip():
+            if answer:
                 return answer
 
-            raise Exception("Gemini không trả về nội dung.")
+            raise RuntimeError("Gemini không trả về nội dung.")
 
         except Exception as e:
             error_text = str(e)
@@ -447,53 +508,37 @@ def ask_gemini(question, context_text):
                 continue
 
             if "429" in error_text:
-                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
+                raise RuntimeError("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
 
             if "403" in error_text:
-                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
+                raise RuntimeError("API key hoặc project Gemini chưa có quyền truy cập model này.")
 
-            raise e
+            raise RuntimeError(error_text)
 
-    raise Exception("Gemini quá tải sau nhiều lần thử.")
+    raise RuntimeError("Gemini quá tải sau nhiều lần thử.")
 
 
-st.markdown(
-    """
-<style>
-.block-container{
-    max-width:1200px;
-    padding-top:25px;
-}
+import platform
+from pathlib import Path
 
-.stButton button{
-    width:100%;
-    height:50px;
-    border-radius:14px;
-    font-size:16px;
-    font-weight:700;
-}
+def get_default_realesrgan_path():
+    system_name = platform.system().lower()
 
-.answer-box{
-    padding:24px;
-    border-radius:18px;
-    background:#111827;
-    border:1px solid #374151;
-    margin-top:10px;
-    line-height:1.7;
-}
+    if "windows" in system_name:
+        # Đường dẫn tuyệt đối tới file .exe trên máy Windows của bạn
+        return Path(r"D:\Practice\Rag\TimKiemUngDung\Timkiemnoidung\realesrgan-ncnn-vulkan-v0.2.0-windows\realesrgan-ncnn-vulkan.exe")
 
-.history-box{
-    padding:10px;
-    border-radius:12px;
-    margin-bottom:8px;
-    background:#111827;
-    border:1px solid #374151;
-    font-size:14px;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+    # Linux / Mac (chưa cần)
+    candidates = [
+        Path("realesrgan-ncnn-vulkan-v0.2.0-ubuntu/realesrgan-ncnn-vulkan"),
+        Path("realesrgan-ncnn-vulkan"),
+    ]
+
+    for path in candidates:
+        if path.exists():
+            return path
+
+    return candidates[0]
 
 
 with st.sidebar:
@@ -510,12 +555,13 @@ with st.sidebar:
 
     history_list = st.session_state.get("question_history", [])
 
-    if len(history_list) > 0:
+    if history_list:
         for i, q in enumerate(history_list[::-1], start=1):
+            safe_q = q.replace("<", "&lt;").replace(">", "&gt;")
             st.markdown(
                 f"""
 <div class="history-box">
-<b>{i}.</b> {q}
+<b>{i}.</b> {safe_q}
 </div>
 """,
                 unsafe_allow_html=True,
@@ -532,58 +578,19 @@ Chưa có câu hỏi nào
 
 
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
+st.caption("Chat với PDF, Markdown và TXT bằng Gemini")
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
     type=["pdf", "md", "markdown", "txt"],
     accept_multiple_files=True,
 )
-st.title("🫀 ECG Image Enhancer (Real-ESRGAN)")
-uploaded_ecg = st.file_uploader(
-    "Tải ảnh tờ điện tim lên",
-    type=["png", "jpg", "jpeg"],
-    key="ecg_uploader"
-)
-if uploaded_ecg:
-    # Lưu file tạm
-    file_path = UPLOADS_DIR / uploaded_ecg.name
-    with open(file_path, "wb") as f:
-        f.write(uploaded_ecg.getbuffer())
 
-    st.image(file_path, caption="Ảnh gốc", use_column_width=True)
-
-    # Nâng cấp ảnh bằng Real-ESRGAN
-    st.info("🛠 Đang nâng cấp ảnh bằng Real-ESRGAN...")
-    OUTPUT_DIR = Path("outputs")
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    output_path = OUTPUT_DIR / f"enhanced_{uploaded_ecg.name}"
-
-    cmd = [
-    sys.executable,
-    "Real-ESRGAN/inference_realesrgan.py",
-    "-n", "RealESRGAN_x4plus",
-    "-i", str(file_path),
-    "-o", str(output_path),
-    "--outscale", "4"
-    ]
-
-    try:
-        subprocess.run(cmd, check=True)
-        st.success("✅ Hoàn tất nâng cấp ảnh!")
-
-        enhanced_image = Image.open(output_path)
-        st.image(enhanced_image, caption="Ảnh đã nâng cấp", use_column_width=True)
-
-    except Exception as e:
-        st.error(f"Lỗi khi chạy Real-ESRGAN: {e}")
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-
 question = st.chat_input("Hỏi nội dung tài liệu...")
-
 
 if question:
     if not uploaded_files:
@@ -614,12 +621,7 @@ if question:
         st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
         st.stop()
 
-    selected_nodes = select_relevant_nodes(
-        question=question,
-        nodes=all_nodes,
-        top_k=TOP_K,
-    )
-
+    selected_nodes = select_relevant_nodes(question, all_nodes, TOP_K)
     context_text = build_context(selected_nodes)
     st.session_state.last_context = context_text
 
@@ -649,3 +651,163 @@ if question:
 
     with st.expander("📚 Xem context đã dùng"):
         st.code(context_text)
+
+
+st.markdown("---")
+st.header("🖼️ Làm nét / Upscale ảnh bằng Real-ESRGAN")
+st.caption(
+    "Chức năng này dùng Real-ESRGAN NCNN Vulkan chạy local. "
+    "Trên Streamlit Cloud có thể không chạy được nếu thiếu Vulkan/GPU."
+)
+
+with st.expander("⚙️ Cấu hình Real-ESRGAN", expanded=False):
+    realesrgan_exe = st.text_input(
+        "Đường dẫn file realesrgan-ncnn-vulkan",
+        value=get_default_realesrgan_path(),
+        help=(
+            "Windows: đường dẫn tới realesrgan-ncnn-vulkan.exe. "
+            "Linux/Streamlit Cloud: đường dẫn tới file realesrgan-ncnn-vulkan."
+        ),
+    )
+
+    model_name = st.selectbox(
+        "Model",
+        options=[
+            "realesrgan-x4plus",
+            "realesrnet-x4plus",
+            "realesrgan-x4plus-anime",
+            "realesr-animevideov3",
+            "realesr-general-x4v3",
+        ],
+        index=0,
+    )
+
+    output_format = st.selectbox(
+        "Định dạng output",
+        options=["png", "jpg", "webp"],
+        index=0,
+    )
+
+    scale = st.selectbox(
+        "Tỉ lệ upscale",
+        options=[2, 3, 4],
+        index=2,
+    )
+
+    tile_size = st.number_input(
+        "Tile size",
+        min_value=0,
+        max_value=1024,
+        value=0,
+        step=32,
+        help="0 = tự động.",
+    )
+
+    show_debug = st.checkbox("Hiện debug Real-ESRGAN", value=False)
+
+
+upscale_file = st.file_uploader(
+    "📤 Tải ảnh cần làm nét",
+    type=["jpg", "jpeg", "png", "webp"],
+    accept_multiple_files=False,
+    key="realesrgan_image_uploader",
+)
+
+col_preview_1, col_preview_2 = st.columns(2)
+
+if upscale_file is not None:
+    image_bytes = upscale_file.getvalue()
+    safe_image_name = safe_filename(upscale_file.name)
+
+    with col_preview_1:
+        st.subheader("Ảnh gốc")
+        st.image(image_bytes, use_container_width=True)
+
+    run_upscale = st.button("🚀 Làm nét ảnh bằng Real-ESRGAN")
+
+    if run_upscale:
+        exe_path = Path(realesrgan_exe.strip().strip('"'))
+
+        if show_debug:
+            st.write("BASE_DIR:", BASE_DIR)
+            st.write("Real-ESRGAN path:", exe_path)
+            st.write("Exists:", exe_path.exists())
+            st.write("Is file:", exe_path.is_file())
+            st.write("Platform:", platform.system())
+
+        if not exe_path.exists():
+            st.error("Không tìm thấy file Real-ESRGAN. Hãy kiểm tra lại đường dẫn hoặc đã push file lên GitHub chưa.")
+            st.stop()
+
+        if not exe_path.is_file():
+            st.error("Đường dẫn Real-ESRGAN không phải là file executable.")
+            st.stop()
+
+        if platform.system().lower() != "windows":
+            try:
+                exe_path.chmod(0o755)
+            except Exception:
+                pass
+
+        job_id = hashlib.md5(image_bytes + str(time.time()).encode()).hexdigest()[:10]
+        job_dir = UPLOADS_DIR / f"realesrgan_job_{job_id}"
+        job_dir.mkdir(exist_ok=True)
+
+        input_path = job_dir / safe_image_name
+        output_path = job_dir / f"upscaled_{Path(safe_image_name).stem}.{output_format}"
+
+        input_path.write_bytes(image_bytes)
+
+        cmd = [
+            str(exe_path),
+            "-i", str(input_path),
+            "-o", str(output_path),
+            "-n", model_name,
+            "-s", str(scale),
+            "-f", output_format,
+        ]
+
+        if tile_size and tile_size > 0:
+            cmd.extend(["-t", str(tile_size)])
+
+        try:
+            with st.spinner("Real-ESRGAN đang xử lý ảnh..."):
+                completed = subprocess.run(
+                    cmd,
+                    cwd=str(exe_path.parent),
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+
+            if completed.returncode != 0:
+                st.error("Real-ESRGAN chạy lỗi.")
+                st.code(completed.stderr or completed.stdout or "Không có log lỗi.")
+                st.stop()
+
+            if not output_path.exists():
+                st.error("Không tìm thấy file output sau khi xử lý.")
+                st.stop()
+
+            output_bytes = output_path.read_bytes()
+
+            with col_preview_2:
+                st.subheader("Ảnh sau khi làm nét")
+                st.image(output_bytes, use_container_width=True)
+
+            mime_type = "image/jpeg" if output_format == "jpg" else f"image/{output_format}"
+
+            st.success("Xử lý xong!")
+            st.download_button(
+                "⬇️ Tải ảnh đã làm nét",
+                data=output_bytes,
+                file_name=output_path.name,
+                mime=mime_type,
+            )
+
+        except subprocess.TimeoutExpired:
+            st.error("Real-ESRGAN xử lý quá lâu. Hãy thử ảnh nhỏ hơn hoặc giảm tile size.")
+        except Exception as e:
+            st.error(f"Lỗi khi chạy Real-ESRGAN: {e}")
+else:
+    st.info("Tải một ảnh lên để dùng chức năng Real-ESRGAN.")
