@@ -1,26 +1,43 @@
-import re, time, hashlib, os
+import re
+import time
+import hashlib
 from pathlib import Path
-from PIL import Image
+
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-import fitz  # PyMuPDF
-from basicsr.archs.rrdbnet_arch import RRDBNet
-from realesrgan import RealESRGAN
-from helper_module import split_text
-# ====================== Thư mục ======================
+import os
+import google.generativeai as genai
+# ====================== Cấu hình cơ bản ======================
+APP_TITLE = "ECG Analyzer & Enhancer AI"
 BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 OUTPUT_DIR = BASE_DIR / "output"
-WEIGHTS_DIR = BASE_DIR / "weights"
 UPLOADS_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
-WEIGHTS_DIR.mkdir(exist_ok=True)
 
-# ====================== Config Gemini ======================
 APP_TITLE = "DocAnalyzer AI"
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+BASE_DIR = Path(__file__).parent.resolve()
+UPLOADS_DIR = BASE_DIR / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
+
+MODEL_NAME = "gemini-2.5-flash"
+MAX_OUTPUT_TOKENS = 700
+TOP_K = 3
+
+# GHI API KEY CỦA BẠN Ở ĐÂY
+GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
+
+
+st.set_page_config(
+    page_title=APP_TITLE,
+    page_icon="📄",
+    layout="wide",
+)
+
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 if not GEMINI_API_KEY:
     st.error("Chưa cấu hình GEMINI_API_KEY trong biến môi trường.")
@@ -28,88 +45,121 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 if "question_history" not in st.session_state:
     st.session_state.question_history = []
+
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
 
-MAX_OUTPUT_TOKENS = 700
-TOP_K = 3
-
-# ====================== Streamlit ======================
-st.set_page_config(page_title=APP_TITLE, page_icon="📄", layout="wide")
-st.title("📄 ECG Image Enhancer - Real-ESRGAN")
-st.caption("Upload ảnh hoặc PDF ECG và làm rõ nét bằng Real-ESRGAN")
-
 # ====================== Real-ESRGAN ======================
 @st.cache_resource
-def load_sr_model(model_name="General x4plus"):
-    model = RRDBNet(
-        num_in_ch=3, num_out_ch=3,
-        num_feat=64, num_block=23,
-        num_grow_ch=32, scale=4
-    )
-    model_path = WEIGHTS_DIR / ("Real-ESRGAN/weights/RealESRGAN_x4plus.pth" if model_name=="General x4plus" else "Real-ESRGAN/weights/RealESRGAN_x4plus_anime_6B.pth")
-    upscaler = RealESRGANer(
-        scale=4,
-        model_path=str(model_path),
-        model=model,
-        tile=0,
-        tile_pad=10,
-        pre_pad=0,
-        half=True
-    )
-    return upscaler
+def load_sr_model():
+    model = RealESRGAN('cuda', scale=2)
+    model.load_weights('weights/RealESRGAN_x4plus_anime_6B.pth')
+    return model
 
-model_choice = st.radio(
-    "Chọn model nâng nét",
-    ("General x4plus", "Anime x4plus anime 6B")
-)
+sr_model = load_sr_model()
 
-sr_model = load_sr_model(model_choice)
+def enhance_image(image_path, scale=2):
+    img = Image.open(image_path).convert('RGB')
+    sr_img = sr_model.predict(img)
+    output_path = OUTPUT_DIR / f"sr_{Path(image_path).name}"
+    sr_img.save(output_path)
+    return output_path, sr_img
 
-def enhance_image(img: Image.Image):
-    sr_img, _ = sr_model.enhance(img, outscale=4)
-    return sr_img
+def clean_answer(text):
+    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
+    text = re.sub(r"\s+\.", ".", text)
+    text = re.sub(r"\s+,", ",", text)
+    return text.strip()
 
-def process_file(file_path: Path):
-    outputs = []
-    if file_path.suffix.lower() in [".png", ".jpg", ".jpeg"]:
-        img = Image.open(file_path).convert("RGB")
-        sr_img = enhance_image(img)
-        out_path = OUTPUT_DIR / f"sr_{file_path.name}"
-        sr_img.save(out_path)
-        outputs.append(out_path)
-    elif file_path.suffix.lower() == ".pdf":
-        doc = fitz.open(file_path)
-        for i, page in enumerate(doc, start=1):
-            pix = page.get_pixmap(dpi=300)
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            sr_img = enhance_image(img)
-            out_path = OUTPUT_DIR / f"sr_{file_path.stem}_page{i}.png"
-            sr_img.save(out_path)
-            outputs.append(out_path)
-    return outputs
 
-# ====================== Upload ảnh / PDF ======================
-uploaded_files = st.file_uploader(
-    "Upload ảnh hoặc PDF ECG",
-    type=["png","jpg","jpeg","pdf"],
-    accept_multiple_files=True
-)
+def get_file_hash(file_bytes):
+    return hashlib.md5(file_bytes).hexdigest()
 
-if uploaded_files:
-    st.info("⏳ Đang nâng nét...")
-    for uploaded_file in uploaded_files:
-        file_path = UPLOADS_DIR / uploaded_file.name
-        file_path.write_bytes(uploaded_file.getbuffer())
-        out_paths = process_file(file_path)
-        for out_path in out_paths:
-            st.success(f"Nâng nét xong: {out_path.name}")
-            st.image(out_path, use_column_width=True)
-            st.write(f"Saved in: {out_path}")
+
+def save_uploaded_file(uploaded_file):
+    file_bytes = uploaded_file.getvalue()
+    file_hash = get_file_hash(file_bytes)
+
+    safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
+    save_path = UPLOADS_DIR / f"{file_hash[:10]}_{safe_name}"
+
+    if not save_path.exists():
+        save_path.write_bytes(file_bytes)
+
+    return save_path
+
+
+def split_text(text, chunk_size=1000, overlap=120):
+    text = text.strip()
+
+    if not text:
+        return []
+
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    paragraphs = text.split("\n")
+
+    chunks = []
+    current_chunk = ""
+
+    for para in paragraphs:
+        para = para.strip()
+
+        if not para:
+            continue
+
+        if len(current_chunk) + len(para) + 1 <= chunk_size:
+            current_chunk = f"{current_chunk}\n{para}" if current_chunk else para
+        else:
+            if current_chunk.strip():
+                chunks.append(current_chunk.strip())
+
+            if len(para) > chunk_size:
+                start = 0
+
+                while start < len(para):
+                    end = start + chunk_size
+                    chunks.append(para[start:end].strip())
+                    start = max(end - overlap, start + 1)
+            else:
+                current_chunk = para
+
+    if current_chunk.strip():
+        chunks.append(current_chunk.strip())
+
+    return chunks
+
+
+def extract_pdf_text(pdf_path):
+    reader = PdfReader(str(pdf_path))
+
+    nodes = []
+    counter = 0
+
+    for page_index, page in enumerate(reader.pages, start=1):
+        page_text = page.extract_text() or ""
+        chunks = split_text(page_text)
+
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            counter += 1
+
+            nodes.append({
+                "node_id": str(counter).zfill(4),
+                "title": f"Page {page_index}",
+                "path": f"{pdf_path.name} > Page {page_index} > Chunk {chunk_index}",
+                "source_file": pdf_path.name,
+                "page": page_index,
+                "chunk": chunk_index,
+                "text": chunk,
+            })
+
+    return nodes
+
 
 def extract_txt_nodes(file_path):
     text = file_path.read_text(
