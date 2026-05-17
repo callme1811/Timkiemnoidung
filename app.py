@@ -6,6 +6,8 @@ from pathlib import Path
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
+from PIL import Image
+import subprocess
 
 
 APP_TITLE = "DocAnalyzer AI"
@@ -537,8 +539,42 @@ uploaded_files = st.file_uploader(
     type=["pdf", "md", "markdown", "txt"],
     accept_multiple_files=True,
 )
+st.title("🫀 ECG Image Enhancer (Real-ESRGAN)")
+uploaded_ecg = st.file_uploader(
+    "Tải ảnh tờ điện tim lên",
+    type=["png", "jpg", "jpeg"],
+    key="ecg_uploader"
+)
+if uploaded_ecg:
+    # Lưu file tạm
+    file_path = UPLOADS_DIR / uploaded_ecg.name
+    with open(file_path, "wb") as f:
+        f.write(uploaded_ecg.getbuffer())
 
+    st.image(file_path, caption="Ảnh gốc", use_column_width=True)
 
+    # Nâng cấp ảnh bằng Real-ESRGAN
+    st.info("🛠 Đang nâng cấp ảnh bằng Real-ESRGAN...")
+
+    output_path = OUTPUT_DIR / f"enhanced_{uploaded_ecg.name}"
+
+    cmd = [
+        "python", "inference_realesrgan.py",
+        "-n", "RealESRGAN_x4plus",
+        "-i", str(file_path),
+        "-o", str(output_path),
+        "--outscale", "4"
+    ]
+
+    try:
+        subprocess.run(cmd, check=True)
+        st.success("✅ Hoàn tất nâng cấp ảnh!")
+
+        enhanced_image = Image.open(output_path)
+        st.image(enhanced_image, caption="Ảnh đã nâng cấp", use_column_width=True)
+
+    except Exception as e:
+        st.error(f"Lỗi khi chạy Real-ESRGAN: {e}")
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
