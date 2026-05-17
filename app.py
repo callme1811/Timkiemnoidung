@@ -5,9 +5,9 @@ import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 import fitz  # PyMuPDF
-from realesrgan.archs import RRDBNet
-from realesrgan import RealESRGANer
-
+from basicsr.archs.rrdbnet_arch import RRDBNet
+from realesrgan import RealESRGAN
+from helper_module import split_text
 # ====================== Thư mục ======================
 BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
@@ -51,7 +51,7 @@ def load_sr_model(model_name="General x4plus"):
         num_feat=64, num_block=23,
         num_grow_ch=32, scale=4
     )
-    model_path = WEIGHTS_DIR / ("weights/RealESRGAN_x4plus.pth" if model_name=="General x4plus" else "weights/RealESRGAN_x4plus_anime_6B.pth")
+    model_path = WEIGHTS_DIR / ("Real-ESRGAN/weights/RealESRGAN_x4plus.pth" if model_name=="General x4plus" else "Real-ESRGAN/weights/RealESRGAN_x4plus_anime_6B.pth")
     upscaler = RealESRGANer(
         scale=4,
         model_path=str(model_path),
