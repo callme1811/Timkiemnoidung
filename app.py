@@ -18,15 +18,8 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-# LẤY GEMINI API KEY TỪ STREAMLIT SECRETS
-try:
-    GEMINI_API_KEY = st.secrets["gemini"]["AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"]
-except Exception:
-    GEMINI_API_KEY = None
-
-if not GEMINI_API_KEY:
-    st.error("Bạn chưa cấu hình GEMINI_API_KEY trong Streamlit Secrets.")
-    st.stop()
+# GHI API KEY CỦA BẠN Ở ĐÂY
+GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
 
 
 st.set_page_config(
