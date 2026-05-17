@@ -3,11 +3,13 @@ import time
 import hashlib
 from pathlib import Path
 
+
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 
-
+from PIL import Image
+from realesrgan import RealESRGAN
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -18,10 +20,6 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
-
-# GHI API KEY CỦA BẠN Ở ĐÂY
-#GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
-
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -39,6 +37,18 @@ if not GEMINI_API_KEY:
 # Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
+# ------------------- Khởi tạo model Real-ESRGAN -------------------
+sr_model = RealESRGAN('cuda', scale=4)  # nếu dùng CPU thì 'cpu'
+sr_model.load_weights('weights/RealESRGAN_x4plus.pth')
+
+def upscale_ecg_image(image_path):
+    """Làm nét ảnh ECG bằng Real-ESRGAN"""
+    img = Image.open(image_path).convert('RGB')
+    sr_img = sr_model.predict(img)
+    out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
+    sr_img.save(out_path)
+    return str(out_path)
+
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -48,6 +58,7 @@ if "question_history" not in st.session_state:
 
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
+
 
 
 def clean_answer(text):
@@ -547,6 +558,18 @@ uploaded_files = st.file_uploader(
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+
+# ------------------- Xử lý upload + Real-ESRGAN -------------------
+if uploaded_files:
+    saved_paths = []
+    for uploaded_file in uploaded_files:
+        file_path = save_uploaded_file(uploaded_file)
+
+        # Làm nét nếu là ảnh ECG
+        if Path(file_path).suffix.lower() in [".png", ".jpg", ".jpeg"]:
+            file_path = upscale_ecg_image(file_path)
+
+        saved_paths.append(str(file_path))
 
 
 question = st.chat_input("Hỏi nội dung tài liệu...")
