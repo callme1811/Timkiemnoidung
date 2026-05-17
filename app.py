@@ -6,15 +6,7 @@ from pathlib import Path
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
-import os
-import google.generativeai as genai
-# ====================== Cấu hình cơ bản ======================
-APP_TITLE = "ECG Analyzer & Enhancer AI"
-BASE_DIR = Path(__file__).parent.resolve()
-UPLOADS_DIR = BASE_DIR / "uploads"
-OUTPUT_DIR = BASE_DIR / "output"
-UPLOADS_DIR.mkdir(exist_ok=True)
-OUTPUT_DIR.mkdir(exist_ok=True)
+
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -26,8 +18,15 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-# GHI API KEY CỦA BẠN Ở ĐÂY
-GEMINI_API_KEY = "AIzaSyBN5uyJlTfKjm1eUdg7EDiAfMbeF6EW7sc"
+# LẤY GEMINI API KEY TỪ STREAMLIT SECRETS
+try:
+    GEMINI_API_KEY = st.secrets["gemini"]["api_key"]
+except Exception:
+    GEMINI_API_KEY = None
+
+if not GEMINI_API_KEY:
+    st.error("Bạn chưa cấu hình GEMINI_API_KEY trong Streamlit Secrets.")
+    st.stop()
 
 
 st.set_page_config(
@@ -36,11 +35,8 @@ st.set_page_config(
     layout="wide",
 )
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-
-if not GEMINI_API_KEY:
-    st.error("Chưa cấu hình GEMINI_API_KEY trong biến môi trường.")
+if not GEMINI_API_KEY or GEMINI_API_KEY == "YOUR_GEMINI_API_KEY_HERE":
+    st.error("Bạn chưa điền GEMINI_API_KEY trong code.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -55,21 +51,6 @@ if "question_history" not in st.session_state:
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
 
-# ====================== Real-ESRGAN ======================
-@st.cache_resource
-def load_sr_model():
-    model = RealESRGAN('cuda', scale=2)
-    model.load_weights('weights/RealESRGAN_x4plus_anime_6B.pth')
-    return model
-
-sr_model = load_sr_model()
-
-def enhance_image(image_path, scale=2):
-    img = Image.open(image_path).convert('RGB')
-    sr_img = sr_model.predict(img)
-    output_path = OUTPUT_DIR / f"sr_{Path(image_path).name}"
-    sr_img.save(output_path)
-    return output_path, sr_img
 
 def clean_answer(text):
     text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
@@ -637,4 +618,3 @@ if question:
 
     with st.expander("📚 Xem context đã dùng"):
         st.code(context_text)
-        
