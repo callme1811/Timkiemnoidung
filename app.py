@@ -555,11 +555,12 @@ if uploaded_ecg:
 
     # Nâng cấp ảnh bằng Real-ESRGAN
     st.info("🛠 Đang nâng cấp ảnh bằng Real-ESRGAN...")
-
+    OUTPUT_DIR = Path("outputs")
+    OUTPUT_DIR.mkdir(exist_ok=True)
     output_path = OUTPUT_DIR / f"enhanced_{uploaded_ecg.name}"
 
     cmd = [
-        "python", "inference_realesrgan.py",
+        "python", "Real-ESRGAN/inference_realesrgan.py",
         "-n", "RealESRGAN_x4plus",
         "-i", str(file_path),
         "-o", str(output_path),
