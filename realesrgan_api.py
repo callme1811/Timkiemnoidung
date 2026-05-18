@@ -1,13 +1,16 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
+
 from PIL import Image
 from io import BytesIO
+
 import numpy as np
 import torch
 import sys
+import os
 
-import torchvision.transforms.functional as functional
-sys.modules["torchvision.transforms.functional_tensor"] = functional
+# thêm path real-esrgan local
+sys.path.append("real-esrgan")
 
 from realesrgan import RealESRGANer
 from basicsr.archs.rrdbnet_arch import RRDBNet
@@ -29,13 +32,16 @@ upsampler = RealESRGANer(
     scale=4,
     model_path="weights/RealESRGAN_x4plus.pth",
     model=model,
-    tile=256,
+    tile=0,
     tile_pad=10,
     pre_pad=0,
     half=False,
     device=DEVICE,
 )
 
+@app.get("/")
+def home():
+    return {"status": "ok"}
 
 @app.post("/upscale")
 async def upscale(file: UploadFile = File(...)):
@@ -47,6 +53,7 @@ async def upscale(file: UploadFile = File(...)):
     output, _ = upsampler.enhance(img_np, outscale=4)
 
     out_img = Image.fromarray(output)
+
     buffer = BytesIO()
     out_img.save(buffer, format="PNG")
     buffer.seek(0)
