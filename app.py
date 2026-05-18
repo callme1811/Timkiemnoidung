@@ -1,15 +1,13 @@
+import os
 import re
 import time
 import hashlib
 from pathlib import Path
 
-
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 
-from PIL import Image
-from realesrgan import RealESRGAN
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -21,32 +19,56 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
+USE_REALESRGAN = os.getenv("USE_REALESRGAN", "false").lower() == "true"
+
+
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="📄",
     layout="wide",
 )
 
-# Lấy key từ Streamlit Secrets
+
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
     st.error("API key không tìm thấy trong secrets. Vui lòng thêm vào Secrets.")
     st.stop()
 
-# Cấu hình Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-# ------------------- Khởi tạo model Real-ESRGAN -------------------
-sr_model = RealESRGAN('cuda', scale=4)  # nếu dùng CPU thì 'cpu'
-sr_model.load_weights('weights/RealESRGAN_x4plus.pth')
+
+@st.cache_resource(show_spinner=False)
+def load_realesrgan_model():
+    """
+    Chỉ load RealESRGAN khi USE_REALESRGAN=true.
+    Streamlit Cloud mặc định không bật để tránh lỗi cv2/torch/cuda.
+    """
+    from realesrgan import RealESRGAN
+
+    device = os.getenv("REALESRGAN_DEVICE", "cpu")
+    model = RealESRGAN(device, scale=4)
+    model.load_weights("weights/RealESRGAN_x4plus.pth")
+    return model
+
 
 def upscale_ecg_image(image_path):
-    """Làm nét ảnh ECG bằng Real-ESRGAN"""
-    img = Image.open(image_path).convert('RGB')
+    """
+    Nếu USE_REALESRGAN=true thì làm nét ảnh.
+    Nếu false thì trả về ảnh gốc để app vẫn chạy được.
+    """
+    if not USE_REALESRGAN:
+        return str(image_path)
+
+    from PIL import Image
+
+    sr_model = load_realesrgan_model()
+    img = Image.open(image_path).convert("RGB")
     sr_img = sr_model.predict(img)
+
     out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
     sr_img.save(out_path)
+
     return str(out_path)
 
 
@@ -58,7 +80,6 @@ if "question_history" not in st.session_state:
 
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
-
 
 
 def clean_answer(text):
@@ -513,6 +534,11 @@ st.markdown(
 with st.sidebar:
     st.title("📚 Lịch sử")
 
+    if USE_REALESRGAN:
+        st.success("RealESRGAN: Đang bật")
+    else:
+        st.info("RealESRGAN: Đang tắt trên môi trường deploy")
+
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
         st.session_state.question_history = []
@@ -550,7 +576,7 @@ st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
-    type=["pdf", "md", "markdown", "txt"],
+    type=["pdf", "md", "markdown", "txt", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
 )
 
@@ -558,18 +584,6 @@ uploaded_files = st.file_uploader(
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
-# ------------------- Xử lý upload + Real-ESRGAN -------------------
-if uploaded_files:
-    saved_paths = []
-    for uploaded_file in uploaded_files:
-        file_path = save_uploaded_file(uploaded_file)
-
-        # Làm nét nếu là ảnh ECG
-        if Path(file_path).suffix.lower() in [".png", ".jpg", ".jpeg"]:
-            file_path = upscale_ecg_image(file_path)
-
-        saved_paths.append(str(file_path))
 
 
 question = st.chat_input("Hỏi nội dung tài liệu...")
@@ -596,12 +610,16 @@ if question:
 
         for uploaded_file in uploaded_files:
             file_path = save_uploaded_file(uploaded_file)
+
+            if Path(file_path).suffix.lower() in [".png", ".jpg", ".jpeg"]:
+                file_path = upscale_ecg_image(file_path)
+
             saved_paths.append(str(file_path))
 
         all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
 
     if not all_nodes:
-        st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh, cần OCR.")
+        st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh hoặc ảnh ECG, cần thêm OCR/vision model.")
         st.stop()
 
     selected_nodes = select_relevant_nodes(

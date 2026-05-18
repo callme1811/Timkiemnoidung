@@ -1,0 +1,226 @@
+{
+  "doc_name": "technova_ai_demo_data",
+  "line_count": 220,
+  "structure": [
+    {
+      "title": "Báo Cáo Nội Bộ Công Ty TechNova AI 2025",
+      "node_id": "0001",
+      "line_num": 1,
+      "nodes": [
+        {
+          "title": "1. Tổng quan công ty",
+          "node_id": "0002",
+          "line_num": 3,
+          "nodes": [
+            {
+              "title": "1.1 Sứ mệnh",
+              "node_id": "0003",
+              "line_num": 9
+            },
+            {
+              "title": "1.2 Tầm nhìn",
+              "node_id": "0004",
+              "line_num": 13
+            }
+          ]
+        },
+        {
+          "title": "2. Tình hình tài chính",
+          "node_id": "0005",
+          "line_num": 19,
+          "nodes": [
+            {
+              "title": "2.1 Doanh thu",
+              "node_id": "0006",
+              "line_num": 21
+            },
+            {
+              "title": "2.2 Chi phí",
+              "node_id": "0007",
+              "line_num": 34
+            },
+            {
+              "title": "2.3 Lợi nhuận",
+              "node_id": "0008",
+              "line_num": 45
+            }
+          ]
+        },
+        {
+          "title": "3. Rủi ro kinh doanh",
+          "node_id": "0009",
+          "line_num": 51,
+          "nodes": [
+            {
+              "title": "3.1 Rủi ro phụ thuộc nhà cung cấp AI",
+              "node_id": "0010",
+              "line_num": 53
+            },
+            {
+              "title": "3.2 Rủi ro bảo mật dữ liệu",
+              "node_id": "0011",
+              "line_num": 57
+            },
+            {
+              "title": "3.3 Rủi ro cạnh tranh",
+              "node_id": "0012",
+              "line_num": 61
+            },
+            {
+              "title": "3.4 Rủi ro hạ tầng",
+              "node_id": "0013",
+              "line_num": 65
+            }
+          ]
+        },
+        {
+          "title": "4. Sản phẩm chính",
+          "node_id": "0014",
+          "line_num": 71,
+          "nodes": [
+            {
+              "title": "4.1 AI Assistant Platform",
+              "node_id": "0015",
+              "line_num": 73
+            },
+            {
+              "title": "4.2 Document Intelligence",
+              "node_id": "0016",
+              "line_num": 83
+            },
+            {
+              "title": "4.3 Enterprise Search",
+              "node_id": "0017",
+              "line_num": 87
+            }
+          ]
+        },
+        {
+          "title": "5. Quy trình xử lý sự cố kỹ thuật",
+          "node_id": "0018",
+          "line_num": 93,
+          "nodes": [
+            {
+              "title": "5.1 Phân loại sự cố",
+              "node_id": "0019",
+              "line_num": 95
+            },
+            {
+              "title": "5.2 Quy trình xử lý sự cố production",
+              "node_id": "0020",
+              "line_num": 106
+            },
+            {
+              "title": "5.3 Chính sách rollback",
+              "node_id": "0021",
+              "line_num": 118
+            }
+          ]
+        },
+        {
+          "title": "6. Chính sách bảo mật",
+          "node_id": "0022",
+          "line_num": 124,
+          "nodes": [
+            {
+              "title": "6.1 Mã hóa dữ liệu",
+              "node_id": "0023",
+              "line_num": 126
+            },
+            {
+              "title": "6.2 Phân quyền truy cập",
+              "node_id": "0024",
+              "line_num": 130
+            },
+            {
+              "title": "6.3 Lưu vết truy cập",
+              "node_id": "0025",
+              "line_num": 134
+            },
+            {
+              "title": "6.4 Xử lý dữ liệu nhạy cảm",
+              "node_id": "0026",
+              "line_num": 138
+            }
+          ]
+        },
+        {
+          "title": "7. Chính sách nhân sự",
+          "node_id": "0027",
+          "line_num": 144,
+          "nodes": [
+            {
+              "title": "7.1 Nghỉ phép",
+              "node_id": "0028",
+              "line_num": 146
+            },
+            {
+              "title": "7.2 Làm việc từ xa",
+              "node_id": "0029",
+              "line_num": 150
+            },
+            {
+              "title": "7.3 Đánh giá hiệu suất",
+              "node_id": "0030",
+              "line_num": 154
+            }
+          ]
+        },
+        {
+          "title": "8. Hợp đồng và điều khoản pháp lý",
+          "node_id": "0031",
+          "line_num": 160,
+          "nodes": [
+            {
+              "title": "8.1 Chấm dứt hợp đồng",
+              "node_id": "0032",
+              "line_num": 162
+            },
+            {
+              "title": "8.2 Cam kết mức dịch vụ",
+              "node_id": "0033",
+              "line_num": 168
+            },
+            {
+              "title": "8.3 Bảo mật hợp đồng",
+              "node_id": "0034",
+              "line_num": 172
+            }
+          ]
+        },
+        {
+          "title": "9. Kế hoạch phát triển năm 2026",
+          "node_id": "0035",
+          "line_num": 178,
+          "nodes": [
+            {
+              "title": "9.1 Mở rộng thị trường",
+              "node_id": "0036",
+              "line_num": 180
+            },
+            {
+              "title": "9.2 Nâng cấp sản phẩm",
+              "node_id": "0037",
+              "line_num": 184
+            },
+            {
+              "title": "9.3 Mục tiêu tài chính",
+              "node_id": "0038",
+              "line_num": 194
+            }
+          ]
+        },
+        {
+          "title": "10. Câu hỏi demo gợi ý cho PageIndex",
+          "node_id": "0039",
+          "line_num": 200
+        },
+        {
+          "title": "11. Kết luận",
+          "node_id": "0040",
+          "line_num": 217
+        }
+      ]
+    }
+  ]
+}
