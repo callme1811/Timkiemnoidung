@@ -39,7 +39,7 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-from realesrgan import RealESRGAN
+
 @st.cache_resource(show_spinner=False)
 def load_realesrgan_model():
     import sys
