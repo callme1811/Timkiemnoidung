@@ -20,6 +20,7 @@ MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
 USE_REALESRGAN = os.getenv("USE_REALESRGAN", "false").lower() == "true"
+REALESRGAN_DEVICE = os.getenv("REALESRGAN_DEVICE", "cpu")
 
 
 st.set_page_config(
@@ -32,7 +33,7 @@ st.set_page_config(
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
 
 if not GEMINI_API_KEY:
-    st.error("API key không tìm thấy trong secrets. Vui lòng thêm vào Secrets.")
+    st.error("API key không tìm thấy trong secrets. Vui lòng thêm GEMINI_API_KEY vào Secrets.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -40,36 +41,32 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_resource(show_spinner=False)
 def load_realesrgan_model():
-    """
-    Chỉ load RealESRGAN khi USE_REALESRGAN=true.
-    Streamlit Cloud mặc định không bật để tránh lỗi cv2/torch/cuda.
-    """
     from realesrgan import RealESRGAN
 
-    device = os.getenv("REALESRGAN_DEVICE", "cpu")
-    model = RealESRGAN(device, scale=4)
+    model = RealESRGAN(REALESRGAN_DEVICE, scale=4)
     model.load_weights("weights/RealESRGAN_x4plus.pth")
     return model
 
 
 def upscale_ecg_image(image_path):
-    """
-    Nếu USE_REALESRGAN=true thì làm nét ảnh.
-    Nếu false thì trả về ảnh gốc để app vẫn chạy được.
-    """
     if not USE_REALESRGAN:
         return str(image_path)
 
-    from PIL import Image
+    try:
+        from PIL import Image
 
-    sr_model = load_realesrgan_model()
-    img = Image.open(image_path).convert("RGB")
-    sr_img = sr_model.predict(img)
+        sr_model = load_realesrgan_model()
+        img = Image.open(image_path).convert("RGB")
+        sr_img = sr_model.predict(img)
 
-    out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
-    sr_img.save(out_path)
+        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
+        sr_img.save(out_path)
 
-    return str(out_path)
+        return str(out_path)
+
+    except Exception as e:
+        st.warning(f"Không chạy được RealESRGAN, dùng ảnh gốc. Lỗi: {e}")
+        return str(image_path)
 
 
 if "messages" not in st.session_state:
@@ -535,15 +532,16 @@ with st.sidebar:
     st.title("📚 Lịch sử")
 
     if USE_REALESRGAN:
-        st.success("RealESRGAN: Đang bật")
+        st.success(f"RealESRGAN: Đang bật ({REALESRGAN_DEVICE})")
     else:
-        st.info("RealESRGAN: Đang tắt trên môi trường deploy")
+        st.info("RealESRGAN: Đang tắt")
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
         st.session_state.question_history = []
         st.session_state.last_context = ""
         st.cache_data.clear()
+        st.cache_resource.clear()
         st.rerun()
 
     st.markdown("---")
@@ -572,7 +570,7 @@ Chưa có câu hỏi nào
 
 
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown và TXT bằng Gemini 2.5")
+st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini 2.5")
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
@@ -611,15 +609,18 @@ if question:
         for uploaded_file in uploaded_files:
             file_path = save_uploaded_file(uploaded_file)
 
-            if Path(file_path).suffix.lower() in [".png", ".jpg", ".jpeg"]:
+            suffix = Path(file_path).suffix.lower()
+
+            if suffix in [".png", ".jpg", ".jpeg"]:
                 file_path = upscale_ecg_image(file_path)
+                st.info(f"Ảnh đã xử lý: {Path(file_path).name}")
 
             saved_paths.append(str(file_path))
 
         all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
 
     if not all_nodes:
-        st.error("Không đọc được nội dung tài liệu. Nếu PDF là dạng scan ảnh hoặc ảnh ECG, cần thêm OCR/vision model.")
+        st.error("Không đọc được nội dung tài liệu. Ảnh hoặc PDF scan cần OCR/vision model để đọc nội dung.")
         st.stop()
 
     selected_nodes = select_relevant_nodes(
