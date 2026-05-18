@@ -1,3 +1,7 @@
+setuptools==59.5.0
+wheel
+tb-nightly==2.13.0a20230419
+
 fastapi
 uvicorn
 python-multipart
