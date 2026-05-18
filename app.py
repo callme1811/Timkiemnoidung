@@ -622,11 +622,11 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, use_container_width=True)
+                    st.image(str(original_path), use_column_width=True)
 
                 with col2:
                     st.markdown("### Ảnh sau upscale")
-                    st.image(file_path, use_container_width=True)
+                    st.image(str(file_path), use_column_width=True)
 
                 if USE_REALESRGAN:
                     st.success("Đã upscale bằng RealESRGAN")
