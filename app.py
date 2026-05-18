@@ -612,8 +612,26 @@ if question:
             suffix = Path(file_path).suffix.lower()
 
             if suffix in [".png", ".jpg", ".jpeg"]:
+                original_path = str(file_path)
+
                 file_path = upscale_ecg_image(file_path)
-                st.info(f"Ảnh đã xử lý: {Path(file_path).name}")
+
+                st.subheader("🖼️ Kết quả RealESRGAN")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("### Ảnh gốc")
+                    st.image(original_path, use_container_width=True)
+
+                with col2:
+                    st.markdown("### Ảnh sau upscale")
+                    st.image(file_path, use_container_width=True)
+
+                if USE_REALESRGAN:
+                    st.success("Đã upscale bằng RealESRGAN")
+                else:
+                    st.info("RealESRGAN đang tắt, đang dùng ảnh gốc")
 
             saved_paths.append(str(file_path))
 
