@@ -42,6 +42,11 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 @st.cache_resource(show_spinner=False)
 def load_realesrgan_model():
+    import sys
+    import torchvision.transforms.functional as functional
+
+    sys.modules["torchvision.transforms.functional_tensor"] = functional
+
     from realesrgan import RealESRGAN
 
     model = RealESRGAN(REALESRGAN_DEVICE, scale=4)
