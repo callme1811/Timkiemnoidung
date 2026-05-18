@@ -8,7 +8,7 @@ import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 from PIL import Image
-
+import numpy as np
 
 APP_TITLE = "DocAnalyzer AI"
 
@@ -39,7 +39,7 @@ if not GEMINI_API_KEY:
 
 genai.configure(api_key=GEMINI_API_KEY)
 
-
+from realesrgan import RealESRGAN
 @st.cache_resource(show_spinner=False)
 def load_realesrgan_model():
     import sys
@@ -47,11 +47,30 @@ def load_realesrgan_model():
 
     sys.modules["torchvision.transforms.functional_tensor"] = functional
 
-    from realesrgan import RealESRGAN
+    from realesrgan import RealESRGANer
+    from basicsr.archs.rrdbnet_arch import RRDBNet
 
-    model = RealESRGAN(REALESRGAN_DEVICE, scale=4)
-    model.load_weights("weights/RealESRGAN_x4plus.pth")
-    return model
+    model = RRDBNet(
+        num_in_ch=3,
+        num_out_ch=3,
+        num_feat=64,
+        num_block=23,
+        num_grow_ch=32,
+        scale=4,
+    )
+
+    upsampler = RealESRGANer(
+        scale=4,
+        model_path="weights/RealESRGAN_x4plus.pth",
+        model=model,
+        tile=0,
+        tile_pad=10,
+        pre_pad=0,
+        half=False,
+        device=REALESRGAN_DEVICE,
+    )
+
+    return upsampler
 
 
 def upscale_ecg_image(image_path):
@@ -61,7 +80,7 @@ def upscale_ecg_image(image_path):
     try:
         sr_model = load_realesrgan_model()
         img = Image.open(image_path).convert("RGB")
-        sr_img = sr_model.predict(img)
+        sr_img, _ = sr_model.enhance(img)
 
         out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
         sr_img.save(out_path)
