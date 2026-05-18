@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
+from PIL import Image
 
 
 APP_TITLE = "DocAnalyzer AI"
@@ -50,11 +51,9 @@ def load_realesrgan_model():
 
 def upscale_ecg_image(image_path):
     if not USE_REALESRGAN:
-        return str(image_path)
+        return str(image_path), False, "RealESRGAN đang tắt."
 
     try:
-        from PIL import Image
-
         sr_model = load_realesrgan_model()
         img = Image.open(image_path).convert("RGB")
         sr_img = sr_model.predict(img)
@@ -62,11 +61,48 @@ def upscale_ecg_image(image_path):
         out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
         sr_img.save(out_path)
 
-        return str(out_path)
+        return str(out_path), True, "Đã upscale bằng RealESRGAN."
 
     except Exception as e:
-        st.warning(f"Không chạy được RealESRGAN, dùng ảnh gốc. Lỗi: {e}")
-        return str(image_path)
+        return str(image_path), False, f"Không chạy được RealESRGAN, dùng ảnh gốc. Lỗi: {e}"
+
+
+def ask_gemini_vision(question, image_paths):
+    model = genai.GenerativeModel(MODEL_NAME)
+
+    images = []
+    for image_path in image_paths:
+        try:
+            img = Image.open(image_path).convert("RGB")
+            images.append(img)
+        except Exception:
+            continue
+
+    if not images:
+        raise Exception("Không mở được ảnh để Gemini Vision phân tích.")
+
+    prompt = f"""
+Bạn là AI hỗ trợ phân tích ảnh/tài liệu.
+
+NHIỆM VỤ:
+- Trả lời dựa trên ảnh được cung cấp.
+- Nếu ảnh là ECG/điện tim, hãy mô tả những gì có thể quan sát được.
+- Không chẩn đoán y khoa chắc chắn.
+- Nếu ảnh mờ hoặc thiếu thông tin, nói rõ hạn chế.
+- Trả lời bằng tiếng Việt.
+- Dùng markdown ngắn gọn.
+
+CÂU HỎI:
+{question}
+"""
+
+    response = model.generate_content([prompt, *images])
+    answer = getattr(response, "text", "") or ""
+
+    if not answer.strip():
+        raise Exception("Gemini Vision không trả về nội dung.")
+
+    return answer.strip()
 
 
 if "messages" not in st.session_state:
@@ -603,18 +639,17 @@ if question:
     with st.chat_message("user"):
         st.markdown(question)
 
-    with st.spinner("📖 Đang đọc tài liệu..."):
+    with st.spinner("📖 Đang xử lý tài liệu..."):
         saved_paths = []
+        image_paths_for_vision = []
 
         for uploaded_file in uploaded_files:
             file_path = save_uploaded_file(uploaded_file)
-
             suffix = Path(file_path).suffix.lower()
 
             if suffix in [".png", ".jpg", ".jpeg"]:
                 original_path = str(file_path)
-
-                file_path = upscale_ecg_image(file_path)
+                processed_path, ok, message = upscale_ecg_image(file_path)
 
                 st.subheader("🖼️ Kết quả RealESRGAN")
 
@@ -622,23 +657,53 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(str(original_path), use_column_width=True)
+                    st.image(original_path, use_column_width=True)
 
                 with col2:
                     st.markdown("### Ảnh sau upscale")
-                    st.image(str(file_path), use_column_width=True)
+                    st.image(processed_path, use_column_width=True)
 
-                if USE_REALESRGAN:
-                    st.success("Đã upscale bằng RealESRGAN")
+                if ok:
+                    st.success(message)
                 else:
-                    st.info("RealESRGAN đang tắt, đang dùng ảnh gốc")
+                    st.warning(message)
 
-            saved_paths.append(str(file_path))
+                image_paths_for_vision.append(processed_path)
+                saved_paths.append(processed_path)
+            else:
+                saved_paths.append(str(file_path))
 
         all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
 
     if not all_nodes:
-        st.error("Không đọc được nội dung tài liệu. Ảnh hoặc PDF scan cần OCR/vision model để đọc nội dung.")
+        if image_paths_for_vision:
+            with st.chat_message("assistant"):
+                try:
+                    with st.spinner("🤖 Gemini Vision đang phân tích ảnh..."):
+                        vision_answer = ask_gemini_vision(question, image_paths_for_vision)
+
+                    st.markdown(
+                        f"""
+<div class="answer-box">
+
+{vision_answer}
+
+</div>
+""",
+                        unsafe_allow_html=True,
+                    )
+
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": vision_answer,
+                    })
+
+                except Exception as e:
+                    st.error(f"Lỗi Gemini Vision: {e}")
+
+            st.stop()
+
+        st.error("Không đọc được nội dung tài liệu.")
         st.stop()
 
     selected_nodes = select_relevant_nodes(
