@@ -738,6 +738,5 @@ if question:
 
         except Exception as e:
             st.error(f"Lỗi Gemini: {e}")
-
     with st.expander("📚 Xem context đã dùng"):
         st.code(context_text)
