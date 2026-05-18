@@ -10,6 +10,7 @@ from pypdf import PdfReader
 from PIL import Image
 import numpy as np
 
+
 APP_TITLE = "DocAnalyzer AI"
 
 BASE_DIR = Path(__file__).parent.resolve()
@@ -43,12 +44,15 @@ genai.configure(api_key=GEMINI_API_KEY)
 @st.cache_resource(show_spinner=False)
 def load_realesrgan_model():
     import sys
+    import torch
     import torchvision.transforms.functional as functional
 
     sys.modules["torchvision.transforms.functional_tensor"] = functional
 
     from realesrgan import RealESRGANer
     from basicsr.archs.rrdbnet_arch import RRDBNet
+
+    device = torch.device(REALESRGAN_DEVICE)
 
     model = RRDBNet(
         num_in_ch=3,
@@ -67,7 +71,7 @@ def load_realesrgan_model():
         tile_pad=10,
         pre_pad=0,
         half=False,
-        device=REALESRGAN_DEVICE,
+        device=device,
     )
 
     return upsampler
@@ -79,11 +83,14 @@ def upscale_ecg_image(image_path):
 
     try:
         sr_model = load_realesrgan_model()
+
         img = Image.open(image_path).convert("RGB")
-        sr_img, _ = sr_model.enhance(img)
+        img_np = np.array(img)
+
+        sr_img, _ = sr_model.enhance(img_np, outscale=4)
 
         out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
-        sr_img.save(out_path)
+        Image.fromarray(sr_img).save(out_path)
 
         return str(out_path), True, "Đã upscale bằng RealESRGAN."
 
@@ -681,11 +688,11 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, use_column_width=True)
+                    st.image(original_path, use_container_width=True)
 
                 with col2:
                     st.markdown("### Ảnh sau upscale")
-                    st.image(processed_path, use_column_width=True)
+                    st.image(processed_path, use_container_width=True)
 
                 if ok:
                     st.success(message)
@@ -762,5 +769,6 @@ if question:
 
         except Exception as e:
             st.error(f"Lỗi Gemini: {e}")
+
     with st.expander("📚 Xem context đã dùng"):
         st.code(context_text)
