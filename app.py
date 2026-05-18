@@ -4,11 +4,11 @@ import time
 import hashlib
 from pathlib import Path
 
+import requests
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 from PIL import Image
-import numpy as np
 
 
 APP_TITLE = "DocAnalyzer AI"
@@ -21,9 +21,6 @@ MODEL_NAME = "gemini-2.5-flash"
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-USE_REALESRGAN = os.getenv("USE_REALESRGAN", "false").lower() == "true"
-REALESRGAN_DEVICE = os.getenv("REALESRGAN_DEVICE", "cpu")
-
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -32,7 +29,8 @@ st.set_page_config(
 )
 
 
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY")
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
+REALESRGAN_API_URL = st.secrets.get("REALESRGAN_API_URL", "")
 
 if not GEMINI_API_KEY:
     st.error("API key không tìm thấy trong secrets. Vui lòng thêm GEMINI_API_KEY vào Secrets.")
@@ -41,61 +39,28 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 
-@st.cache_resource(show_spinner=False)
-def load_realesrgan_model():
-    import sys
-    import torch
-    import torchvision.transforms.functional as functional
-
-    sys.modules["torchvision.transforms.functional_tensor"] = functional
-
-    from realesrgan import RealESRGANer
-    from basicsr.archs.rrdbnet_arch import RRDBNet
-
-    device = torch.device(REALESRGAN_DEVICE)
-
-    model = RRDBNet(
-        num_in_ch=3,
-        num_out_ch=3,
-        num_feat=64,
-        num_block=23,
-        num_grow_ch=32,
-        scale=4,
-    )
-
-    upsampler = RealESRGANer(
-        scale=4,
-        model_path="weights/RealESRGAN_x4plus.pth",
-        model=model,
-        tile=0,
-        tile_pad=10,
-        pre_pad=0,
-        half=False,
-        device=device,
-    )
-
-    return upsampler
-
-
 def upscale_ecg_image(image_path):
-    if not USE_REALESRGAN:
-        return str(image_path), False, "RealESRGAN đang tắt."
+    if not REALESRGAN_API_URL:
+        return str(image_path), False, "Chưa cấu hình REALESRGAN_API_URL trong Secrets."
 
     try:
-        sr_model = load_realesrgan_model()
+        with open(image_path, "rb") as f:
+            response = requests.post(
+                REALESRGAN_API_URL,
+                files={"file": f},
+                timeout=300,
+            )
 
-        img = Image.open(image_path).convert("RGB")
-        img_np = np.array(img)
+        if response.status_code != 200:
+            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {response.text}"
 
-        sr_img, _ = sr_model.enhance(img_np, outscale=4)
+        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).stem}.png"
+        out_path.write_bytes(response.content)
 
-        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).name}"
-        Image.fromarray(sr_img).save(out_path)
-
-        return str(out_path), True, "Đã upscale bằng RealESRGAN."
+        return str(out_path), True, "Đã upscale bằng RealESRGAN API."
 
     except Exception as e:
-        return str(image_path), False, f"Không chạy được RealESRGAN, dùng ảnh gốc. Lỗi: {e}"
+        return str(image_path), False, f"Không gọi được RealESRGAN API. Lỗi: {e}"
 
 
 def ask_gemini_vision(question, image_paths):
@@ -598,17 +563,16 @@ st.markdown(
 with st.sidebar:
     st.title("📚 Lịch sử")
 
-    if USE_REALESRGAN:
-        st.success(f"RealESRGAN: Đang bật ({REALESRGAN_DEVICE})")
+    if REALESRGAN_API_URL:
+        st.success("RealESRGAN API: Đã cấu hình")
     else:
-        st.info("RealESRGAN: Đang tắt")
+        st.warning("RealESRGAN API: Chưa cấu hình")
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
         st.session_state.question_history = []
         st.session_state.last_context = ""
         st.cache_data.clear()
-        st.cache_resource.clear()
         st.rerun()
 
     st.markdown("---")
