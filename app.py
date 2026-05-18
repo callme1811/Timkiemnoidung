@@ -688,11 +688,11 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, use_container_width=True)
+                    st.image(original_path, width=600)
 
                 with col2:
                     st.markdown("### Ảnh sau upscale")
-                    st.image(processed_path, use_container_width=True)
+                    st.image(processed_path, width=600)
 
                 if ok:
                     st.success(message)
