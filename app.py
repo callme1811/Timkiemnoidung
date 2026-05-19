@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-1.5-flash")
+MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
@@ -55,7 +55,7 @@ def upscale_ecg_image(image_path):
             response = requests.post(
                 REALESRGAN_API_URL,
                 files=files,
-                timeout=300,
+                timeout=600,
             )
 
         if response.status_code != 200:
