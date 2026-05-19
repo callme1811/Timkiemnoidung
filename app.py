@@ -1,4 +1,3 @@
-import os
 import re
 import time
 import hashlib
@@ -17,7 +16,7 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-1.5-flash")
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
@@ -29,11 +28,11 @@ st.set_page_config(
 )
 
 
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
-REALESRGAN_API_URL = st.secrets.get("REALESRGAN_API_URL", "")
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
+REALESRGAN_API_URL = st.secrets.get("REALESRGAN_API_URL", "").strip()
 
 if not GEMINI_API_KEY:
-    st.error("API key không tìm thấy trong secrets. Vui lòng thêm GEMINI_API_KEY vào Secrets.")
+    st.error("Thiếu GEMINI_API_KEY trong Streamlit Secrets.")
     st.stop()
 
 genai.configure(api_key=GEMINI_API_KEY)
@@ -45,19 +44,31 @@ def upscale_ecg_image(image_path):
 
     try:
         with open(image_path, "rb") as f:
+            files = {
+                "file": (
+                    Path(image_path).name,
+                    f,
+                    "image/jpeg",
+                )
+            }
+
             response = requests.post(
                 REALESRGAN_API_URL,
-                files={"file": f},
+                files=files,
                 timeout=300,
             )
 
         if response.status_code != 200:
-            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {response.text}"
+            detail = response.text[:500] if response.text else ""
+            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {detail}"
 
         out_path = Path(image_path).parent / f"upscaled_{Path(image_path).stem}.png"
         out_path.write_bytes(response.content)
 
         return str(out_path), True, "Đã upscale bằng RealESRGAN API."
+
+    except requests.exceptions.Timeout:
+        return str(image_path), False, "API RealESRGAN quá thời gian xử lý."
 
     except Exception as e:
         return str(image_path), False, f"Không gọi được RealESRGAN API. Lỗi: {e}"
@@ -69,10 +80,9 @@ def ask_gemini_vision(question, image_paths):
     images = []
     for image_path in image_paths:
         try:
-            img = Image.open(image_path).convert("RGB")
-            images.append(img)
+            images.append(Image.open(image_path).convert("RGB"))
         except Exception:
-            continue
+            pass
 
     if not images:
         raise Exception("Không mở được ảnh để Gemini Vision phân tích.")
@@ -82,11 +92,10 @@ Bạn là AI hỗ trợ phân tích ảnh/tài liệu.
 
 NHIỆM VỤ:
 - Trả lời dựa trên ảnh được cung cấp.
-- Nếu ảnh là ECG/điện tim, hãy mô tả những gì có thể quan sát được.
+- Nếu ảnh là ECG/điện tim, chỉ mô tả những gì quan sát được.
 - Không chẩn đoán y khoa chắc chắn.
 - Nếu ảnh mờ hoặc thiếu thông tin, nói rõ hạn chế.
-- Trả lời bằng tiếng Việt.
-- Dùng markdown ngắn gọn.
+- Trả lời bằng tiếng Việt, ngắn gọn.
 
 CÂU HỎI:
 {question}
@@ -166,6 +175,8 @@ def split_text(text, chunk_size=1000, overlap=120):
                     end = start + chunk_size
                     chunks.append(para[start:end].strip())
                     start = max(end - overlap, start + 1)
+
+                current_chunk = ""
             else:
                 current_chunk = para
 
@@ -452,17 +463,14 @@ Bạn là AI chuyên phân tích tài liệu.
 NHIỆM VỤ:
 - Chỉ trả lời dựa trên CONTEXT được cung cấp.
 - Không được bịa thông tin ngoài tài liệu.
-- Giải thích dễ hiểu cho người mới.
 - Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
 - Không hiển thị SOURCE.
-- Không nhắc [SOURCE 1], [SOURCE 2], [SOURCE 3].
 - Trả lời ngắn gọn, tối đa 500 từ.
 
 FORMAT:
 - Dùng markdown.
 - Có tiêu đề nhỏ.
 - Có bullet point.
-- Có phần "Ví dụ minh họa".
 - Có phần "Kết luận ngắn".
 
 Nếu tài liệu không có thông tin để trả lời:
@@ -601,7 +609,7 @@ Chưa có câu hỏi nào
 
 
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini 2.5")
+st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini")
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
@@ -652,11 +660,11 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, width=600)
+                    st.image(original_path, use_container_width=True)
 
                 with col2:
                     st.markdown("### Ảnh sau upscale")
-                    st.image(processed_path, width=600)
+                    st.image(processed_path, use_container_width=True)
 
                 if ok:
                     st.success(message)
@@ -664,7 +672,7 @@ if question:
                     st.warning(message)
 
                 image_paths_for_vision.append(processed_path)
-                saved_paths.append(processed_path)
+
             else:
                 saved_paths.append(str(file_path))
 
