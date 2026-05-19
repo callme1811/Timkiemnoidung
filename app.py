@@ -668,10 +668,11 @@ if question:
 
                 if ok:
                     st.success(message)
+                    image_paths_for_vision.append(processed_path)
                 else:
                     st.warning(message)
-
-                image_paths_for_vision.append(processed_path)
+                    st.info("RealESRGAN lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
+                    image_paths_for_vision.append(original_path)
 
             else:
                 saved_paths.append(str(file_path))
