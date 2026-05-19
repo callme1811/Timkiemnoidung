@@ -55,7 +55,7 @@ def upscale_ecg_image(image_path):
             response = requests.post(
                 REALESRGAN_API_URL,
                 files=files,
-                timeout=600,
+                timeout=90,
             )
 
         if response.status_code != 200:
