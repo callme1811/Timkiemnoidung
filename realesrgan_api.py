@@ -36,7 +36,7 @@ def load_upsampler():
         scale=4,
         model_path="weights/RealESRGAN_x4plus.pth",
         model=model,
-        tile=32,
+        tile=8,
         tile_pad=10,
         pre_pad=0,
         half=False,
@@ -71,13 +71,13 @@ async def upscale(file: UploadFile = File(...)):
         img = Image.open(BytesIO(image_bytes)).convert("RGB")
 
         # Giảm kích thước ảnh đầu vào để tránh Render Free bị crash RAM
-        max_side = 900
+        max_side = 400
         img.thumbnail((max_side, max_side))
 
         img_np = np.array(img)
 
         # outscale=2 nhẹ hơn outscale=4
-        output, _ = upsampler.enhance(img_np, outscale=2)
+        output, _ = upsampler.enhance(img_np, outscale=1)
 
         out_img = Image.fromarray(output)
 
