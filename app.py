@@ -42,8 +42,17 @@ def upscale_ecg_image(image_path):
     if not REALESRGAN_API_URL:
         return str(image_path), False, "Chưa cấu hình REALESRGAN_API_URL trong Secrets."
 
+    if "ngrok-free.dev" not in REALESRGAN_API_URL:
+        return str(image_path), False, "Ngrok URL không hợp lệ."
+
     try:
-        with open(image_path, "rb") as f:
+        img = Image.open(image_path).convert("RGB")
+        img.thumbnail((800, 800))
+
+        temp_path = Path(image_path).parent / f"compressed_{Path(image_path).name}"
+        img.save(temp_path, format="JPEG", quality=85)
+
+        with open(temp_path, "rb") as f:
             files = {
                 "file": (
                     Path(image_path).name,
@@ -55,8 +64,23 @@ def upscale_ecg_image(image_path):
             response = requests.post(
                 REALESRGAN_API_URL,
                 files=files,
-                timeout=90,
+                timeout=(30, 180),
             )
+
+        if response.status_code != 200:
+            detail = response.text[:500] if response.text else ""
+            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {detail}"
+
+        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).stem}.png"
+        out_path.write_bytes(response.content)
+
+        return str(out_path), True, "Đã upscale bằng RealESRGAN API."
+
+    except requests.exceptions.Timeout:
+        return str(image_path), False, "API RealESRGAN quá thời gian xử lý."
+
+    except Exception as e:
+        return str(image_path), False, f"Không gọi được RealESRGAN API. Lỗi: {e}"
 
         if response.status_code != 200:
             detail = response.text[:500] if response.text else ""
