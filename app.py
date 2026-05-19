@@ -29,7 +29,7 @@ st.set_page_config(
 
 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-REALESRGAN_API_URL = st.secrets.get("REALESRGAN_API_URL", "").strip()
+REALESRGAN_API_URL = "https://snack-shush-quack.ngrok-free.dev/upscale"
 
 if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY trong Streamlit Secrets.")
