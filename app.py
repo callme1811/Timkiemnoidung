@@ -46,11 +46,7 @@ def upscale_ecg_image(image_path):
         return str(image_path), False, "Ngrok URL không hợp lệ."
 
     try:
-        img = Image.open(image_path).convert("RGB")
-        img.thumbnail((800, 800))
-
-        temp_path = Path(image_path).parent / f"compressed_{Path(image_path).name}"
-        img.save(temp_path, format="JPEG", quality=85)
+        temp_path = image_path
 
         with open(temp_path, "rb") as f:
             files = {
@@ -66,7 +62,6 @@ def upscale_ecg_image(image_path):
                 files=files,
                 timeout=(30, 180),
             )
-
         if response.status_code != 200:
             detail = response.text[:500] if response.text else ""
             return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {detail}"
