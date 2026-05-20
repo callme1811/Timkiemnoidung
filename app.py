@@ -828,7 +828,7 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, use_container_width=True)
+                    st.image(original_path, width=600)
 
                 with col2:
                     if enable_enhance:
@@ -836,7 +836,7 @@ if question:
                     else:
                         st.markdown("### Ảnh đang dùng")
 
-                    st.image(processed_path, use_container_width=True)
+                    st.image(processed_path, width=600)
 
                     try:
                         with open(processed_path, "rb") as f:
