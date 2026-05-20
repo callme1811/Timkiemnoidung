@@ -64,4 +64,6 @@
 ├── requirements.txt
 ├── runtime.txt
 ├── uploads/
+├── .streamlit/
+│   └── secrets.toml
 └── README.md
