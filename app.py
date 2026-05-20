@@ -20,6 +20,11 @@ MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
+IMAGE_ENHANCE_API_URL = st.secrets.get(
+    "IMAGE_ENHANCE_API_URL",
+    "https://snack-shush-quack.ngrok-free.dev/upscale",
+).strip()
+
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -29,7 +34,6 @@ st.set_page_config(
 
 
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-REALESRGAN_API_URL = "https://snack-shush-quack.ngrok-free.dev/upscale"
 
 if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY trong Streamlit Secrets.")
@@ -38,65 +42,80 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 
-def upscale_ecg_image(image_path):
-    if not REALESRGAN_API_URL:
-        return str(image_path), False, "Chưa cấu hình REALESRGAN_API_URL trong Secrets."
-
-    if "ngrok-free.dev" not in REALESRGAN_API_URL:
-        return str(image_path), False, "Ngrok URL không hợp lệ."
+def check_image_enhance_api_status():
+    if not IMAGE_ENHANCE_API_URL:
+        return False
 
     try:
-        temp_path = image_path
+        health_url = IMAGE_ENHANCE_API_URL.replace("/upscale", "/health")
+        response = requests.get(health_url, timeout=5)
+        return response.status_code == 200
+    except Exception:
+        return False
 
-        with open(temp_path, "rb") as f:
+
+def get_mime_type(path):
+    suffix = Path(path).suffix.lower()
+
+    if suffix in [".jpg", ".jpeg"]:
+        return "image/jpeg"
+
+    if suffix == ".png":
+        return "image/png"
+
+    return "application/octet-stream"
+
+
+def enhance_image(image_path, mode="balanced"):
+    if not IMAGE_ENHANCE_API_URL:
+        return str(image_path), False, "Chưa cấu hình Image Enhance API."
+
+    try:
+        with open(image_path, "rb") as f:
             files = {
                 "file": (
                     Path(image_path).name,
                     f,
-                    "image/jpeg",
+                    get_mime_type(image_path),
                 )
             }
 
+            data = {
+                "mode": mode,
+            }
+
             response = requests.post(
-                REALESRGAN_API_URL,
+                IMAGE_ENHANCE_API_URL,
                 files=files,
+                data=data,
                 timeout=(30, 300),
             )
-        if response.status_code != 200:
-            detail = response.text[:500] if response.text else ""
-            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {detail}"
-
-        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).stem}.png"
-        out_path.write_bytes(response.content)
-
-        return str(out_path), True, "Đã upscale bằng RealESRGAN API."
-
-    except requests.exceptions.Timeout:
-        return str(image_path), False, "API RealESRGAN quá thời gian xử lý."
-
-    except Exception as e:
-        return str(image_path), False, f"Không gọi được RealESRGAN API. Lỗi: {e}"
 
         if response.status_code != 200:
             detail = response.text[:500] if response.text else ""
-            return str(image_path), False, f"API RealESRGAN lỗi: {response.status_code} - {detail}"
+            return (
+                str(image_path),
+                False,
+                f"Image Enhance API lỗi: {response.status_code} - {detail}",
+            )
 
-        out_path = Path(image_path).parent / f"upscaled_{Path(image_path).stem}.png"
-        out_path.write_bytes(response.content)
+        output_path = Path(image_path).parent / f"enhanced_{Path(image_path).stem}.png"
+        output_path.write_bytes(response.content)
 
-        return str(out_path), True, "Đã upscale bằng RealESRGAN API."
+        return str(output_path), True, "Đã làm rõ ảnh thành công."
 
     except requests.exceptions.Timeout:
-        return str(image_path), False, "API RealESRGAN quá thời gian xử lý."
+        return str(image_path), False, "Image Enhance API quá thời gian xử lý."
 
     except Exception as e:
-        return str(image_path), False, f"Không gọi được RealESRGAN API. Lỗi: {e}"
+        return str(image_path), False, f"Không gọi được Image Enhance API. Lỗi: {e}"
 
 
 def ask_gemini_vision(question, image_paths):
     model = genai.GenerativeModel(MODEL_NAME)
 
     images = []
+
     for image_path in image_paths:
         try:
             images.append(Image.open(image_path).convert("RGB"))
@@ -127,16 +146,6 @@ CÂU HỎI:
         raise Exception("Gemini Vision không trả về nội dung.")
 
     return answer.strip()
-
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "question_history" not in st.session_state:
-    st.session_state.question_history = []
-
-if "last_context" not in st.session_state:
-    st.session_state.last_context = ""
 
 
 def clean_answer(text):
@@ -548,6 +557,16 @@ def ask_gemini(question, context_text):
     raise Exception("Gemini quá tải sau nhiều lần thử.")
 
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "question_history" not in st.session_state:
+    st.session_state.question_history = []
+
+if "last_context" not in st.session_state:
+    st.session_state.last_context = ""
+
+
 st.markdown(
     """
 <style>
@@ -581,6 +600,14 @@ st.markdown(
     border:1px solid #374151;
     font-size:14px;
 }
+
+.api-box{
+    padding:12px;
+    border-radius:12px;
+    background:#111827;
+    border:1px solid #374151;
+    margin-bottom:12px;
+}
 </style>
 """,
     unsafe_allow_html=True,
@@ -590,10 +617,12 @@ st.markdown(
 with st.sidebar:
     st.title("📚 Lịch sử")
 
-    if REALESRGAN_API_URL:
-        st.success("RealESRGAN API: Đã cấu hình")
+    api_online = check_image_enhance_api_status()
+
+    if api_online:
+        st.success("Image Enhance API: Online")
     else:
-        st.warning("RealESRGAN API: Chưa cấu hình")
+        st.error("Image Enhance API: Offline")
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
@@ -629,6 +658,37 @@ Chưa có câu hỏi nào
 
 st.title("📄 DocAnalyzer AI")
 st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini")
+
+
+with st.expander("⚙️ Cài đặt xử lý ảnh", expanded=True):
+    col_a, col_b = st.columns([2, 1])
+
+    with col_a:
+        process_mode_label = st.radio(
+            "Chọn chế độ xử lý ảnh",
+            ["Nhanh", "Cân bằng", "Rõ nét cao"],
+            horizontal=True,
+        )
+
+    with col_b:
+        enable_enhance = st.toggle(
+            "Dùng Image Enhance",
+            value=True,
+        )
+
+    mode_map = {
+        "Nhanh": "fast",
+        "Cân bằng": "balanced",
+        "Rõ nét cao": "high_quality",
+    }
+
+    process_mode = mode_map[process_mode_label]
+
+    if enable_enhance:
+        st.info(f"Đang bật làm rõ ảnh. Chế độ: {process_mode_label}")
+    else:
+        st.warning("Đang tắt làm rõ ảnh. Gemini sẽ dùng ảnh gốc.")
+
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
@@ -671,9 +731,21 @@ if question:
 
             if suffix in [".png", ".jpg", ".jpeg"]:
                 original_path = str(file_path)
-                processed_path, ok, message = upscale_ecg_image(file_path)
 
-                st.subheader("🖼️ Kết quả RealESRGAN")
+                if enable_enhance:
+                    processed_path, ok, message = enhance_image(
+                        image_path=file_path,
+                        mode=process_mode,
+                    )
+
+                    if not ok:
+                        processed_path = original_path
+                else:
+                    processed_path = original_path
+                    ok = True
+                    message = "Đang dùng ảnh gốc."
+
+                st.subheader("🖼️ Kết quả xử lý ảnh")
 
                 col1, col2 = st.columns(2)
 
@@ -682,16 +754,31 @@ if question:
                     st.image(original_path, width=600)
 
                 with col2:
-                    st.markdown("### Ảnh sau upscale")
+                    if enable_enhance:
+                        st.markdown("### Ảnh đã làm rõ")
+                    else:
+                        st.markdown("### Ảnh đang dùng")
+
                     st.image(processed_path, width=600)
+
+                    try:
+                        with open(processed_path, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Tải ảnh đã làm rõ",
+                                data=f,
+                                file_name=Path(processed_path).name,
+                                mime=get_mime_type(processed_path),
+                            )
+                    except Exception:
+                        st.warning("Không thể tạo nút tải ảnh.")
 
                 if ok:
                     st.success(message)
-                    image_paths_for_vision.append(processed_path)
                 else:
                     st.warning(message)
-                    st.info("RealESRGAN lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
-                    image_paths_for_vision.append(original_path)
+                    st.info("API lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
+
+                image_paths_for_vision.append(processed_path)
 
             else:
                 saved_paths.append(str(file_path))
@@ -703,7 +790,10 @@ if question:
             with st.chat_message("assistant"):
                 try:
                     with st.spinner("🤖 Gemini Vision đang phân tích ảnh..."):
-                        vision_answer = ask_gemini_vision(question, image_paths_for_vision)
+                        vision_answer = ask_gemini_vision(
+                            question,
+                            image_paths_for_vision,
+                        )
 
                     st.markdown(
                         f"""
