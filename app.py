@@ -2,6 +2,7 @@ import re
 import time
 import hashlib
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import requests
 import streamlit as st
@@ -25,15 +26,14 @@ IMAGE_ENHANCE_API_URL = st.secrets.get(
     "https://snack-shush-quack.ngrok-free.dev/upscale",
 ).strip()
 
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
+
 
 st.set_page_config(
     page_title=APP_TITLE,
     page_icon="📄",
     layout="wide",
 )
-
-
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
 
 if not GEMINI_API_KEY:
     st.error("Thiếu GEMINI_API_KEY trong Streamlit Secrets.")
@@ -42,16 +42,79 @@ if not GEMINI_API_KEY:
 genai.configure(api_key=GEMINI_API_KEY)
 
 
+# =========================
+# SESSION STATE
+# =========================
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "question_history" not in st.session_state:
+    st.session_state.question_history = []
+
+if "last_context" not in st.session_state:
+    st.session_state.last_context = ""
+
+
+# =========================
+# API HELPERS
+# =========================
+
+def build_health_url(api_url: str) -> str:
+    """
+    Nếu API là:
+    https://abc.ngrok-free.dev/upscale
+
+    Health sẽ là:
+    https://abc.ngrok-free.dev/health
+    """
+    parsed = urlparse(api_url)
+    return urlunparse((
+        parsed.scheme,
+        parsed.netloc,
+        "/health",
+        "",
+        "",
+        "",
+    ))
+
+
 def check_image_enhance_api_status():
+    """
+    Check API theo 2 cách:
+    1. Thử /health nếu backend có route health.
+    2. Nếu /health không có, vẫn coi API sống nếu host trả response hợp lệ.
+    """
     if not IMAGE_ENHANCE_API_URL:
-        return False
+        return False, "Chưa cấu hình URL"
+
+    health_url = build_health_url(IMAGE_ENHANCE_API_URL)
 
     try:
-        health_url = IMAGE_ENHANCE_API_URL.replace("/upscale", "/health")
         response = requests.get(health_url, timeout=5)
-        return response.status_code == 200
-    except Exception:
-        return False
+
+        if response.status_code == 200:
+            return True, "Online"
+
+        if response.status_code in [404, 405]:
+            root_url = f"{urlparse(IMAGE_ENHANCE_API_URL).scheme}://{urlparse(IMAGE_ENHANCE_API_URL).netloc}"
+
+            try:
+                root_response = requests.get(root_url, timeout=5)
+
+                if root_response.status_code < 500:
+                    return True, "Online, nhưng thiếu /health"
+
+            except Exception:
+                pass
+
+        return False, f"Offline: HTTP {response.status_code}"
+
+    except requests.exceptions.Timeout:
+        return False, "Timeout"
+
+    except Exception as e:
+        return False, f"Không kết nối được: {e}"
 
 
 def get_mime_type(path):
@@ -111,6 +174,10 @@ def enhance_image(image_path, mode="balanced"):
         return str(image_path), False, f"Không gọi được Image Enhance API. Lỗi: {e}"
 
 
+# =========================
+# GEMINI
+# =========================
+
 def ask_gemini_vision(question, image_paths):
     model = genai.GenerativeModel(MODEL_NAME)
 
@@ -132,6 +199,7 @@ NHIỆM VỤ:
 - Trả lời dựa trên ảnh được cung cấp.
 - Nếu ảnh là ECG/điện tim, chỉ mô tả những gì quan sát được.
 - Không chẩn đoán y khoa chắc chắn.
+- Không khẳng định bệnh lý chắc chắn.
 - Nếu ảnh mờ hoặc thiếu thông tin, nói rõ hạn chế.
 - Trả lời bằng tiếng Việt, ngắn gọn.
 
@@ -154,6 +222,83 @@ def clean_answer(text):
     text = re.sub(r"\s+,", ",", text)
     return text.strip()
 
+
+def build_prompt(question, context_text):
+    return f"""
+Bạn là AI chuyên phân tích tài liệu.
+
+NHIỆM VỤ:
+- Chỉ trả lời dựa trên CONTEXT được cung cấp.
+- Không được bịa thông tin ngoài tài liệu.
+- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
+- Không hiển thị SOURCE.
+- Trả lời ngắn gọn, tối đa 500 từ.
+
+FORMAT:
+- Dùng markdown.
+- Có tiêu đề nhỏ.
+- Có bullet point.
+- Có phần "Kết luận ngắn".
+
+Nếu tài liệu không có thông tin để trả lời:
+"Tôi không tìm thấy thông tin này trong tài liệu."
+
+QUESTION:
+{question}
+
+CONTEXT:
+{context_text}
+"""
+
+
+def ask_gemini(question, context_text):
+    model = genai.GenerativeModel(MODEL_NAME)
+    prompt = build_prompt(question, context_text)
+
+    retries = 3
+
+    for attempt in range(retries):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": 0.25,
+                    "max_output_tokens": MAX_OUTPUT_TOKENS,
+                },
+                stream=False,
+            )
+
+            answer = getattr(response, "text", "") or ""
+            answer = clean_answer(answer)
+
+            if answer.strip():
+                return answer
+
+            raise Exception("Gemini không trả về nội dung.")
+
+        except Exception as e:
+            error_text = str(e)
+
+            if "503" in error_text or "overloaded" in error_text.lower():
+                wait_time = 2 * (attempt + 1)
+                st.warning(f"Gemini đang quá tải. Đang thử lại sau {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+
+            if "429" in error_text:
+                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
+
+            if "403" in error_text:
+                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
+
+            raise e
+
+    raise Exception("Gemini quá tải sau nhiều lần thử.")
+
+
+# =========================
+# FILE PARSING
+# =========================
 
 def get_file_hash(file_bytes):
     return hashlib.md5(file_bytes).hexdigest()
@@ -476,110 +621,26 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
 
 
 def build_context(selected_nodes):
-    context_parts = []
-
-    for n in selected_nodes:
-        context_parts.append(n.get("text", ""))
-
-    return "\n\n".join(context_parts)
+    return "\n\n".join([n.get("text", "") for n in selected_nodes])
 
 
-def build_prompt(question, context_text):
-    return f"""
-Bạn là AI chuyên phân tích tài liệu.
-
-NHIỆM VỤ:
-- Chỉ trả lời dựa trên CONTEXT được cung cấp.
-- Không được bịa thông tin ngoài tài liệu.
-- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
-- Không hiển thị SOURCE.
-- Trả lời ngắn gọn, tối đa 500 từ.
-
-FORMAT:
-- Dùng markdown.
-- Có tiêu đề nhỏ.
-- Có bullet point.
-- Có phần "Kết luận ngắn".
-
-Nếu tài liệu không có thông tin để trả lời:
-"Tôi không tìm thấy thông tin này trong tài liệu."
-
-QUESTION:
-{question}
-
-CONTEXT:
-{context_text}
-"""
-
-
-def ask_gemini(question, context_text):
-    model = genai.GenerativeModel(MODEL_NAME)
-    prompt = build_prompt(question, context_text)
-
-    retries = 3
-
-    for attempt in range(retries):
-        try:
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.25,
-                    "max_output_tokens": MAX_OUTPUT_TOKENS,
-                },
-                stream=False,
-            )
-
-            answer = getattr(response, "text", "") or ""
-            answer = clean_answer(answer)
-
-            if answer.strip():
-                return answer
-
-            raise Exception("Gemini không trả về nội dung.")
-
-        except Exception as e:
-            error_text = str(e)
-
-            if "503" in error_text or "overloaded" in error_text.lower():
-                wait_time = 2 * (attempt + 1)
-                st.warning(f"Gemini đang quá tải. Đang thử lại sau {wait_time}s...")
-                time.sleep(wait_time)
-                continue
-
-            if "429" in error_text:
-                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
-
-            if "403" in error_text:
-                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
-
-            raise e
-
-    raise Exception("Gemini quá tải sau nhiều lần thử.")
-
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "question_history" not in st.session_state:
-    st.session_state.question_history = []
-
-if "last_context" not in st.session_state:
-    st.session_state.last_context = ""
-
+# =========================
+# CSS
+# =========================
 
 st.markdown(
     """
 <style>
 .block-container{
     max-width:1200px;
-    padding-top:25px;
+    padding-top:32px;
 }
 
 .stButton button{
     width:100%;
-    height:50px;
+    height:48px;
     border-radius:14px;
-    font-size:16px;
+    font-size:15px;
     font-weight:700;
 }
 
@@ -593,7 +654,7 @@ st.markdown(
 }
 
 .history-box{
-    padding:10px;
+    padding:12px;
     border-radius:12px;
     margin-bottom:8px;
     background:#111827;
@@ -601,12 +662,13 @@ st.markdown(
     font-size:14px;
 }
 
-.api-box{
-    padding:12px;
-    border-radius:12px;
-    background:#111827;
-    border:1px solid #374151;
-    margin-bottom:12px;
+.small-muted{
+    opacity:0.75;
+    font-size:13px;
+}
+
+img{
+    border-radius:10px;
 }
 </style>
 """,
@@ -614,15 +676,22 @@ st.markdown(
 )
 
 
+# =========================
+# SIDEBAR
+# =========================
+
 with st.sidebar:
     st.title("📚 Lịch sử")
 
-    api_online = check_image_enhance_api_status()
+    api_online, api_message = check_image_enhance_api_status()
 
     if api_online:
-        st.success("Image Enhance API: Online")
+        st.success(f"Image Enhance API: {api_message}")
     else:
-        st.error("Image Enhance API: Offline")
+        st.error(f"Image Enhance API: {api_message}")
+
+    with st.expander("🔗 API URL", expanded=False):
+        st.code(IMAGE_ENHANCE_API_URL)
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
@@ -635,7 +704,7 @@ with st.sidebar:
 
     history_list = st.session_state.get("question_history", [])
 
-    if len(history_list) > 0:
+    if history_list:
         for i, q in enumerate(history_list[::-1], start=1):
             st.markdown(
                 f"""
@@ -655,6 +724,10 @@ Chưa có câu hỏi nào
             unsafe_allow_html=True,
         )
 
+
+# =========================
+# MAIN UI
+# =========================
 
 st.title("📄 DocAnalyzer AI")
 st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini")
@@ -705,6 +778,10 @@ for msg in st.session_state.messages:
 question = st.chat_input("Hỏi nội dung tài liệu...")
 
 
+# =========================
+# MAIN FLOW
+# =========================
+
 if question:
     if not uploaded_files:
         st.warning("Vui lòng upload tài liệu.")
@@ -751,7 +828,7 @@ if question:
 
                 with col1:
                     st.markdown("### Ảnh gốc")
-                    st.image(original_path, width=600)
+                    st.image(original_path, use_container_width=True)
 
                 with col2:
                     if enable_enhance:
@@ -759,7 +836,7 @@ if question:
                     else:
                         st.markdown("### Ảnh đang dùng")
 
-                    st.image(processed_path, width=600)
+                    st.image(processed_path, use_container_width=True)
 
                     try:
                         with open(processed_path, "rb") as f:
