@@ -1,22 +1,67 @@
-# PageIndex Local Document Search
+# 🔍 DocAnalyzer AI
 
-Ứng dụng tìm kiếm tài liệu sử dụng:
+<p align="center">
+  AI-powered document & ECG image analysis using Streamlit, Gemini and OpenCV.
+</p>
 
-- PageIndex
-- Ollama
-- Gemma
+<p align="center">
+
+![Python](https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python)
+![Streamlit](https://img.shields.io/badge/Streamlit-App-red?style=for-the-badge&logo=streamlit)
+![Gemini](https://img.shields.io/badge/Gemini-AI-orange?style=for-the-badge)
+![OpenCV](https://img.shields.io/badge/OpenCV-Computer%20Vision-green?style=for-the-badge)
+
+</p>
+
+---
+
+# ✨ Features
+
+- 📄 Chat with PDF, Markdown and TXT
+- 🖼️ ECG image enhancement with OpenCV
+- 🤖 Gemini Vision analysis
+- 💬 AI document Q&A
+- ⚡ Fast local processing
+- 🌙 Modern dark UI
+- 📥 Download enhanced images
+
+---
+
+# 🧠 Tech Stack
+
 - Streamlit
+- Google Gemini API
+- OpenCV
+- Pillow
+- PyPDF
+- Python
 
-## Chức năng
+---
 
-- Build tree structure từ markdown
-- Retrieval theo PageIndex
-- Reasoning bằng Gemma local
-- Hỏi đáp tài liệu
+# 🚀 Demo
 
-## Chạy ứng dụng
+## ECG Enhancement
 
-Cài thư viện:
+| Original | Enhanced |
+|---|---|
+| Blurry ECG scan | Sharpened waveform & improved contrast |
+
+---
+
+## Document AI
+
+- Upload PDF / Markdown / TXT
+- Ask questions about documents
+- AI answers using retrieval context
+
+---
+
+# 📂 Project Structure
 
 ```bash
-py -m pip install -r requirements.txt
+.
+├── app.py
+├── requirements.txt
+├── runtime.txt
+├── uploads/
+└── README.md
