@@ -2,32 +2,34 @@ import re
 import time
 import hashlib
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
 
-import requests
+import cv2
+import numpy as np
 import streamlit as st
 import google.generativeai as genai
 from pypdf import PdfReader
 from PIL import Image
 
 
-APP_TITLE = "DocAnalyzer AI"
+# =========================
+# CONFIG
+# =========================
 
+APP_TITLE = "DocAnalyzer AI"
 BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
+
 MAX_OUTPUT_TOKENS = 700
 TOP_K = 3
 
-IMAGE_ENHANCE_API_URL = st.secrets.get(
-    "IMAGE_ENHANCE_API_URL",
-    "https://snack-shush-quack.ngrok-free.dev/upscale",
-).strip()
 
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-
+# =========================
+# PAGE SETUP
+# =========================
 
 st.set_page_config(
     page_title=APP_TITLE,
@@ -57,65 +59,8 @@ if "last_context" not in st.session_state:
 
 
 # =========================
-# API HELPERS
+# OPENCV IMAGE HELPERS
 # =========================
-
-def build_health_url(api_url: str) -> str:
-    """
-    Nếu API là:
-    https://abc.ngrok-free.dev/upscale
-
-    Health sẽ là:
-    https://abc.ngrok-free.dev/health
-    """
-    parsed = urlparse(api_url)
-    return urlunparse((
-        parsed.scheme,
-        parsed.netloc,
-        "/health",
-        "",
-        "",
-        "",
-    ))
-
-
-def check_image_enhance_api_status():
-    """
-    Check API theo 2 cách:
-    1. Thử /health nếu backend có route health.
-    2. Nếu /health không có, vẫn coi API sống nếu host trả response hợp lệ.
-    """
-    if not IMAGE_ENHANCE_API_URL:
-        return False, "Chưa cấu hình URL"
-
-    health_url = build_health_url(IMAGE_ENHANCE_API_URL)
-
-    try:
-        response = requests.get(health_url, timeout=5)
-
-        if response.status_code == 200:
-            return True, "Online"
-
-        if response.status_code in [404, 405]:
-            root_url = f"{urlparse(IMAGE_ENHANCE_API_URL).scheme}://{urlparse(IMAGE_ENHANCE_API_URL).netloc}"
-
-            try:
-                root_response = requests.get(root_url, timeout=5)
-
-                if root_response.status_code < 500:
-                    return True, "Online, nhưng thiếu /health"
-
-            except Exception:
-                pass
-
-        return False, f"Offline: HTTP {response.status_code}"
-
-    except requests.exceptions.Timeout:
-        return False, "Timeout"
-
-    except Exception as e:
-        return False, f"Không kết nối được: {e}"
-
 
 def get_mime_type(path):
     suffix = Path(path).suffix.lower()
@@ -129,49 +74,105 @@ def get_mime_type(path):
     return "application/octet-stream"
 
 
-def enhance_image(image_path, mode="balanced"):
-    if not IMAGE_ENHANCE_API_URL:
-        return str(image_path), False, "Chưa cấu hình Image Enhance API."
+def enhance_image_opencv(image_path, mode="balanced"):
+    image_path = Path(image_path)
+    img = cv2.imread(str(image_path))
+
+    if img is None:
+        return str(image_path), False, "Không đọc được ảnh bằng OpenCV."
 
     try:
-        with open(image_path, "rb") as f:
-            files = {
-                "file": (
-                    Path(image_path).name,
-                    f,
-                    get_mime_type(image_path),
-                )
-            }
+        if mode == "fast":
+            processed = opencv_fast_enhance(img)
+        elif mode == "high_quality":
+            processed = opencv_high_quality_enhance(img)
+        else:
+            processed = opencv_balanced_enhance(img)
 
-            data = {
-                "mode": mode,
-            }
+        output_path = image_path.parent / f"opencv_{mode}_{image_path.stem}.png"
+        saved = cv2.imwrite(str(output_path), processed)
 
-            response = requests.post(
-                IMAGE_ENHANCE_API_URL,
-                files=files,
-                data=data,
-                timeout=(30, 300),
-            )
+        if not saved:
+            return str(image_path), False, "Không lưu được ảnh đã xử lý."
 
-        if response.status_code != 200:
-            detail = response.text[:500] if response.text else ""
-            return (
-                str(image_path),
-                False,
-                f"Image Enhance API lỗi: {response.status_code} - {detail}",
-            )
-
-        output_path = Path(image_path).parent / f"enhanced_{Path(image_path).stem}.png"
-        output_path.write_bytes(response.content)
-
-        return str(output_path), True, "Đã làm rõ ảnh thành công."
-
-    except requests.exceptions.Timeout:
-        return str(image_path), False, "Image Enhance API quá thời gian xử lý."
+        return str(output_path), True, f"Đã xử lý ảnh bằng OpenCV. Chế độ: {mode}."
 
     except Exception as e:
-        return str(image_path), False, f"Không gọi được Image Enhance API. Lỗi: {e}"
+        return str(image_path), False, f"Lỗi xử lý ảnh bằng OpenCV: {e}"
+
+
+def opencv_fast_enhance(img):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+
+    enhanced = cv2.merge((l2, a, b))
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    kernel = np.array([
+        [0, -1, 0],
+        [-1, 5, -1],
+        [0, -1, 0],
+    ])
+
+    return cv2.filter2D(enhanced, -1, kernel)
+
+
+def opencv_balanced_enhance(img):
+    denoised = cv2.fastNlMeansDenoisingColored(
+        img,
+        None,
+        h=6,
+        hColor=6,
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
+
+    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+
+    enhanced = cv2.merge((l2, a, b))
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.0)
+    return cv2.addWeighted(enhanced, 1.5, gaussian, -0.5, 0)
+
+
+def opencv_high_quality_enhance(img):
+    height, width = img.shape[:2]
+
+    scale = 1.5
+    resized = cv2.resize(
+        img,
+        (int(width * scale), int(height * scale)),
+        interpolation=cv2.INTER_CUBIC,
+    )
+
+    denoised = cv2.fastNlMeansDenoisingColored(
+        resized,
+        None,
+        h=8,
+        hColor=8,
+        templateWindowSize=7,
+        searchWindowSize=21,
+    )
+
+    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+
+    enhanced = cv2.merge((l2, a, b))
+    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+
+    gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.2)
+    return cv2.addWeighted(enhanced, 1.7, gaussian, -0.7, 0)
 
 
 # =========================
@@ -180,12 +181,12 @@ def enhance_image(image_path, mode="balanced"):
 
 def ask_gemini_vision(question, image_paths):
     model = genai.GenerativeModel(MODEL_NAME)
-
     images = []
 
     for image_path in image_paths:
         try:
-            images.append(Image.open(image_path).convert("RGB"))
+            image = Image.open(image_path).convert("RGB")
+            images.append(image)
         except Exception:
             pass
 
@@ -361,7 +362,6 @@ def split_text(text, chunk_size=1000, overlap=120):
 
 def extract_pdf_text(pdf_path):
     reader = PdfReader(str(pdf_path))
-
     nodes = []
     counter = 0
 
@@ -371,7 +371,6 @@ def extract_pdf_text(pdf_path):
 
         for chunk_index, chunk in enumerate(chunks, start=1):
             counter += 1
-
             nodes.append({
                 "node_id": str(counter).zfill(4),
                 "title": f"Page {page_index}",
@@ -386,11 +385,7 @@ def extract_pdf_text(pdf_path):
 
 
 def extract_txt_nodes(file_path):
-    text = file_path.read_text(
-        encoding="utf-8",
-        errors="ignore",
-    )
-
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
     chunks = split_text(text)
     nodes = []
 
@@ -438,12 +433,7 @@ def extract_markdown_nodes(md_text):
 def add_text_to_nodes(nodes, lines):
     for i, node in enumerate(nodes):
         start = node["line_num"]
-
-        end = (
-            nodes[i + 1]["line_num"] - 1
-            if i + 1 < len(nodes)
-            else len(lines)
-        )
+        end = nodes[i + 1]["line_num"] - 1 if i + 1 < len(nodes) else len(lines)
 
         node["start_line"] = start
         node["end_line"] = end
@@ -459,7 +449,6 @@ def build_tree(flat_nodes):
 
     for node in flat_nodes:
         counter += 1
-
         tree_node = {
             "title": node["title"],
             "node_id": str(counter).zfill(4),
@@ -478,10 +467,7 @@ def build_tree(flat_nodes):
         else:
             root.append(tree_node)
 
-        stack.append({
-            "level": node["level"],
-            "node": tree_node,
-        })
+        stack.append({"level": node["level"], "node": tree_node})
 
     return root
 
@@ -492,7 +478,6 @@ def flatten_tree(nodes, parent_path="", source_file=""):
     for node in nodes:
         title = node.get("title", "")
         path = f"{parent_path} > {title}" if parent_path else title
-
         text_chunks = split_text(node.get("text", ""))
 
         for chunk_index, chunk in enumerate(text_chunks, start=1):
@@ -509,7 +494,6 @@ def flatten_tree(nodes, parent_path="", source_file=""):
             })
 
         children = node.get("nodes", [])
-
         if children:
             result.extend(flatten_tree(children, path, source_file))
 
@@ -517,11 +501,7 @@ def flatten_tree(nodes, parent_path="", source_file=""):
 
 
 def parse_markdown(file_path):
-    md_text = file_path.read_text(
-        encoding="utf-8",
-        errors="ignore",
-    )
-
+    md_text = file_path.read_text(encoding="utf-8", errors="ignore")
     flat_nodes, lines = extract_markdown_nodes(md_text)
 
     if not flat_nodes:
@@ -529,11 +509,7 @@ def parse_markdown(file_path):
 
     flat_nodes = add_text_to_nodes(flat_nodes, lines)
     tree = build_tree(flat_nodes)
-
-    return flatten_tree(
-        nodes=tree,
-        source_file=file_path.name,
-    )
+    return flatten_tree(nodes=tree, source_file=file_path.name)
 
 
 def parse_document(file_path):
@@ -597,21 +573,13 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
 
     ranked = sorted(
         nodes,
-        key=lambda n: keyword_score(
-            question,
-            n.get("text", ""),
-            n.get("title", ""),
-        ),
+        key=lambda n: keyword_score(question, n.get("text", ""), n.get("title", "")),
         reverse=True,
     )
 
     selected = [
         n for n in ranked
-        if keyword_score(
-            question,
-            n.get("text", ""),
-            n.get("title", ""),
-        ) > 0
+        if keyword_score(question, n.get("text", ""), n.get("title", "")) > 0
     ]
 
     if not selected:
@@ -683,15 +651,8 @@ img{
 with st.sidebar:
     st.title("📚 Lịch sử")
 
-    api_online, api_message = check_image_enhance_api_status()
-
-    if api_online:
-        st.success(f"Image Enhance API: {api_message}")
-    else:
-        st.error(f"Image Enhance API: {api_message}")
-
-    with st.expander("🔗 API URL", expanded=False):
-        st.code(IMAGE_ENHANCE_API_URL)
+    st.success("Xử lý ảnh: OpenCV local")
+    st.caption("Không dùng Colab, không dùng ngrok, không dùng RealESRGAN API.")
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
@@ -730,8 +691,7 @@ Chưa có câu hỏi nào
 # =========================
 
 st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini")
-
+st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini + OpenCV local")
 
 with st.expander("⚙️ Cài đặt xử lý ảnh", expanded=True):
     col_a, col_b = st.columns([2, 1])
@@ -745,7 +705,7 @@ with st.expander("⚙️ Cài đặt xử lý ảnh", expanded=True):
 
     with col_b:
         enable_enhance = st.toggle(
-            "Dùng Image Enhance",
+            "Dùng OpenCV Enhance",
             value=True,
         )
 
@@ -758,10 +718,9 @@ with st.expander("⚙️ Cài đặt xử lý ảnh", expanded=True):
     process_mode = mode_map[process_mode_label]
 
     if enable_enhance:
-        st.info(f"Đang bật làm rõ ảnh. Chế độ: {process_mode_label}")
+        st.info(f"Đang bật xử lý ảnh bằng OpenCV. Chế độ: {process_mode_label}")
     else:
-        st.warning("Đang tắt làm rõ ảnh. Gemini sẽ dùng ảnh gốc.")
-
+        st.warning("Đang tắt xử lý ảnh. Gemini sẽ dùng ảnh gốc.")
 
 uploaded_files = st.file_uploader(
     "📂 Tải tài liệu lên",
@@ -769,11 +728,9 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
 )
 
-
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
 
 question = st.chat_input("Hỏi nội dung tài liệu...")
 
@@ -787,10 +744,7 @@ if question:
         st.warning("Vui lòng upload tài liệu.")
         st.stop()
 
-    st.session_state.messages.append({
-        "role": "user",
-        "content": question,
-    })
+    st.session_state.messages.append({"role": "user", "content": question})
 
     if question not in st.session_state.question_history:
         st.session_state.question_history.append(question)
@@ -810,7 +764,7 @@ if question:
                 original_path = str(file_path)
 
                 if enable_enhance:
-                    processed_path, ok, message = enhance_image(
+                    processed_path, ok, message = enhance_image_opencv(
                         image_path=file_path,
                         mode=process_mode,
                     )
@@ -823,7 +777,6 @@ if question:
                     message = "Đang dùng ảnh gốc."
 
                 st.subheader("🖼️ Kết quả xử lý ảnh")
-
                 col1, col2 = st.columns(2)
 
                 with col1:
@@ -832,7 +785,7 @@ if question:
 
                 with col2:
                     if enable_enhance:
-                        st.markdown("### Ảnh đã làm rõ")
+                        st.markdown("### Ảnh đã xử lý bằng OpenCV")
                     else:
                         st.markdown("### Ảnh đang dùng")
 
@@ -841,7 +794,7 @@ if question:
                     try:
                         with open(processed_path, "rb") as f:
                             st.download_button(
-                                label="⬇️ Tải ảnh đã làm rõ",
+                                label="⬇️ Tải ảnh đã xử lý",
                                 data=f,
                                 file_name=Path(processed_path).name,
                                 mime=get_mime_type(processed_path),
@@ -853,7 +806,7 @@ if question:
                     st.success(message)
                 else:
                     st.warning(message)
-                    st.info("API lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
+                    st.info("OpenCV lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
 
                 image_paths_for_vision.append(processed_path)
 
@@ -867,10 +820,7 @@ if question:
             with st.chat_message("assistant"):
                 try:
                     with st.spinner("🤖 Gemini Vision đang phân tích ảnh..."):
-                        vision_answer = ask_gemini_vision(
-                            question,
-                            image_paths_for_vision,
-                        )
+                        vision_answer = ask_gemini_vision(question, image_paths_for_vision)
 
                     st.markdown(
                         f"""
