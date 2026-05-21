@@ -121,58 +121,65 @@ def opencv_fast_enhance(img):
 
 
 def opencv_balanced_enhance(img):
-    denoised = cv2.fastNlMeansDenoisingColored(
-        img,
-        None,
-        h=6,
-        hColor=6,
-        templateWindowSize=7,
-        searchWindowSize=21,
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    clahe = cv2.createCLAHE(
+        clipLimit=1.5,
+        tileGridSize=(8, 8)
     )
 
-    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    contrast = clahe.apply(gray)
 
-    clahe = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
-    l2 = clahe.apply(l)
+    blur = cv2.GaussianBlur(contrast, (0, 0), 0.6)
 
-    enhanced = cv2.merge((l2, a, b))
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+    sharpen = cv2.addWeighted(
+        contrast,
+        1.4,
+        blur,
+        -0.4,
+        0
+    )
 
-    gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.0)
-    return cv2.addWeighted(enhanced, 1.5, gaussian, -0.5, 0)
+    return cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR)
 
 
 def opencv_high_quality_enhance(img):
-    height, width = img.shape[:2]
+    """
+    ECG/document optimized.
+    Giữ nét mảnh thay vì làm mượt.
+    """
 
-    scale = 1.5
-    resized = cv2.resize(
-        img,
-        (int(width * scale), int(height * scale)),
-        interpolation=cv2.INTER_CUBIC,
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # tăng contrast local nhẹ
+    clahe = cv2.createCLAHE(
+        clipLimit=1.8,
+        tileGridSize=(8, 8)
     )
 
-    denoised = cv2.fastNlMeansDenoisingColored(
-        resized,
-        None,
-        h=8,
-        hColor=8,
-        templateWindowSize=7,
-        searchWindowSize=21,
+    contrast = clahe.apply(gray)
+
+    # sharpen nhẹ bằng unsharp mask
+    blur = cv2.GaussianBlur(contrast, (0, 0), 0.8)
+
+    sharpen = cv2.addWeighted(
+        contrast,
+        1.6,
+        blur,
+        -0.6,
+        0
     )
 
-    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    # bilateral filter giữ edge
+    final = cv2.bilateralFilter(
+        sharpen,
+        d=5,
+        sigmaColor=25,
+        sigmaSpace=25
+    )
 
-    clahe = cv2.createCLAHE(clipLimit=2.8, tileGridSize=(8, 8))
-    l2 = clahe.apply(l)
-
-    enhanced = cv2.merge((l2, a, b))
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-    gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.2)
-    return cv2.addWeighted(enhanced, 1.7, gaussian, -0.7, 0)
+    return cv2.cvtColor(final, cv2.COLOR_GRAY2BGR)
 
 
 # =========================
