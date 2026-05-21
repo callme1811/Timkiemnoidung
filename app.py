@@ -652,7 +652,6 @@ with st.sidebar:
     st.title("📚 Lịch sử")
 
     st.success("Xử lý ảnh: OpenCV local")
-    st.caption("Không dùng Colab, không dùng ngrok, không dùng RealESRGAN API.")
 
     if st.button("🗑️ Xóa lịch sử"):
         st.session_state.messages = []
