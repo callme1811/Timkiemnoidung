@@ -12,7 +12,7 @@ from PIL import Image
 
 
 # =========================
-# CONFIG
+# CONFIG & PATHS
 # =========================
 
 APP_TITLE = "DocAnalyzer AI"
@@ -20,15 +20,9 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOADS_DIR = BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
-MODEL_NAME = st.secrets.get("GEMINI_MODEL", "gemini-2.5-flash")
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "").strip()
-
-MAX_OUTPUT_TOKENS = 700
-TOP_K = 3
-
 
 # =========================
-# PAGE SETUP
+# PAGE SETUP & STYLING
 # =========================
 
 st.set_page_config(
@@ -37,15 +31,103 @@ st.set_page_config(
     layout="wide",
 )
 
-if not GEMINI_API_KEY:
-    st.error("Thiếu GEMINI_API_KEY trong Streamlit Secrets.")
-    st.stop()
+# Custom Premium CSS for Outfit Typography & Glassmorphism Chat Bubbles
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Outfit', sans-serif;
+    }
 
-genai.configure(api_key=GEMINI_API_KEY)
+    .block-container {
+        max-width: 1200px;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    /* Custom Glassmorphism Chat Bubbles styling */
+    .chat-bubble-user {
+        padding: 16px 22px;
+        border-radius: 20px 20px 0px 20px;
+        background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+        color: white;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        margin-bottom: 12px;
+        box-shadow: 0 4px 15px rgba(37, 99, 235, 0.2);
+        line-height: 1.6;
+    }
+
+    .chat-bubble-assistant {
+        padding: 22px 26px;
+        border-radius: 20px 20px 20px 0px;
+        background: #111827;
+        border: 1px solid #374151;
+        color: #F3F4F6;
+        margin-top: 10px;
+        margin-bottom: 16px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+        line-height: 1.7;
+    }
+
+    .answer-header {
+        font-weight: 700;
+        font-size: 1.15rem;
+        color: #60A5FA;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .history-box {
+        padding: 12px;
+        border-radius: 12px;
+        margin-bottom: 8px;
+        background: #1F2937;
+        border: 1px solid #374151;
+        font-size: 14px;
+        color: #D1D5DB;
+        transition: all 0.2s ease;
+        cursor: pointer;
+    }
+    
+    .history-box:hover {
+        border-color: #3B82F6;
+        color: #F3F4F6;
+        background: #111827;
+    }
+
+    img {
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    /* Custom premium buttons */
+    .stButton button {
+        border-radius: 12px !important;
+        background: linear-gradient(135deg, #10B981, #059669) !important;
+        color: white !important;
+        font-weight: 600 !important;
+        border: none !important;
+        transition: all 0.3s ease !important;
+        height: 44px !important;
+    }
+
+    .stButton button:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 6px 20px rgba(16, 185, 129, 0.3) !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # =========================
-# SESSION STATE
+# SESSION STATE INITIALIZATION
 # =========================
 
 if "messages" not in st.session_state:
@@ -57,6 +139,86 @@ if "question_history" not in st.session_state:
 if "last_context" not in st.session_state:
     st.session_state.last_context = ""
 
+if "processed_images" not in st.session_state:
+    # Key format: f"{image_path}_{mode}" -> {"processed_path": str, "ok": bool, "message": str}
+    st.session_state.processed_images = {}
+
+if "pdf_extracted_images" not in st.session_state:
+    # Persistent list of image paths extracted from scanned PDF pages
+    st.session_state.pdf_extracted_images = []
+
+if "parsed_nodes" not in st.session_state:
+    # Flat list of extracted text chunks/nodes
+    st.session_state.parsed_nodes = []
+
+if "node_embeddings" not in st.session_state:
+    # Key format: node_id -> embedding list
+    st.session_state.node_embeddings = {}
+
+if "files_hash" not in st.session_state:
+    # Track uploaded files to reset states on document changes
+    st.session_state.files_hash = ""
+
+
+# =========================
+# SIDEBAR CONFIGURATION
+# =========================
+
+with st.sidebar:
+    st.title("📚 Cấu hình")
+
+    # API Key Settings
+    api_key_env = st.secrets.get("GEMINI_API_KEY", "").strip()
+    api_key_input = st.text_input("🔑 Gemini API Key", value=api_key_env, type="password")
+
+    if not api_key_input:
+        st.error("Thiếu GEMINI_API_KEY. Vui lòng nhập vào ô trên hoặc thiết lập trong Streamlit Secrets.")
+        st.stop()
+
+    genai.configure(api_key=api_key_input)
+
+    st.markdown("---")
+    st.subheader("🤖 Cấu hình AI & Model")
+
+    # Model Selection
+    model_choice = st.selectbox(
+        "Chọn mô hình Gemini",
+        ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
+        index=0
+    )
+
+    # Sliders for LLM
+    temperature = st.slider("Độ sáng tạo (Temperature)", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
+    max_output_tokens = st.slider("Giới hạn từ trả lời (Tokens)", min_value=100, max_value=2048, value=750, step=50)
+
+    st.markdown("---")
+    st.subheader("🔍 Cấu hình RAG & Search")
+
+    # Search Mode Toggle
+    search_mode = st.radio(
+        "Thuật toán tìm kiếm tài liệu",
+        ["Semantic Search (Gemini Embeddings)", "Keyword Search (Từ khóa Cục bộ)"],
+        index=0
+    )
+
+    top_k_val = st.slider("Số lượng ngữ cảnh (Top K)", min_value=1, max_value=10, value=3)
+
+    st.markdown("---")
+    st.subheader("🧼 Dọn dẹp dữ liệu")
+    if st.button("🗑️ Xóa toàn bộ lịch sử"):
+        st.session_state.messages = []
+        st.session_state.question_history = []
+        st.session_state.last_context = ""
+        st.session_state.processed_images = {}
+        st.session_state.pdf_extracted_images = []
+        st.session_state.parsed_nodes = []
+        st.session_state.node_embeddings = {}
+        st.session_state.files_hash = ""
+        st.cache_data.clear()
+        st.success("Đã làm sạch lịch sử thành công!")
+        time.sleep(1)
+        st.rerun()
+
 
 # =========================
 # OPENCV IMAGE HELPERS
@@ -64,13 +226,10 @@ if "last_context" not in st.session_state:
 
 def get_mime_type(path):
     suffix = Path(path).suffix.lower()
-
     if suffix in [".jpg", ".jpeg"]:
         return "image/jpeg"
-
     if suffix == ".png":
         return "image/png"
-
     return "application/octet-stream"
 
 
@@ -89,7 +248,10 @@ def enhance_image_opencv(image_path, mode="balanced"):
         else:
             processed = opencv_balanced_enhance(img)
 
-        output_path = image_path.parent / f"opencv_{mode}_{image_path.stem}.png"
+        output_path = image_path.parent / f"opencv_{mode}_{image_path.name}"
+        if output_path.suffix.lower() not in [".png", ".jpg", ".jpeg"]:
+            output_path = output_path.with_suffix(".png")
+
         saved = cv2.imwrite(str(output_path), processed)
 
         if not saved:
@@ -116,23 +278,17 @@ def opencv_fast_enhance(img):
         [-1, 5, -1],
         [0, -1, 0],
     ])
-
     return cv2.filter2D(enhanced, -1, kernel)
 
 
 def opencv_balanced_enhance(img):
-
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
     clahe = cv2.createCLAHE(
         clipLimit=1.5,
         tileGridSize=(8, 8)
     )
-
     contrast = clahe.apply(gray)
-
     blur = cv2.GaussianBlur(contrast, (0, 0), 0.6)
-
     sharpen = cv2.addWeighted(
         contrast,
         1.4,
@@ -140,29 +296,20 @@ def opencv_balanced_enhance(img):
         -0.4,
         0
     )
-
     return cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR)
 
 
 def opencv_high_quality_enhance(img):
     """
-    ECG/document optimized.
-    Giữ nét mảnh thay vì làm mượt.
+    ECG/document optimized filters.
     """
-
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # tăng contrast local nhẹ
     clahe = cv2.createCLAHE(
         clipLimit=1.8,
         tileGridSize=(8, 8)
     )
-
     contrast = clahe.apply(gray)
-
-    # sharpen nhẹ bằng unsharp mask
     blur = cv2.GaussianBlur(contrast, (0, 0), 0.8)
-
     sharpen = cv2.addWeighted(
         contrast,
         1.6,
@@ -170,142 +317,17 @@ def opencv_high_quality_enhance(img):
         -0.6,
         0
     )
-
-    # bilateral filter giữ edge
     final = cv2.bilateralFilter(
         sharpen,
         d=5,
         sigmaColor=25,
         sigmaSpace=25
     )
-
     return cv2.cvtColor(final, cv2.COLOR_GRAY2BGR)
 
 
 # =========================
-# GEMINI
-# =========================
-
-def ask_gemini_vision(question, image_paths):
-    model = genai.GenerativeModel(MODEL_NAME)
-    images = []
-
-    for image_path in image_paths:
-        try:
-            image = Image.open(image_path).convert("RGB")
-            images.append(image)
-        except Exception:
-            pass
-
-    if not images:
-        raise Exception("Không mở được ảnh để Gemini Vision phân tích.")
-
-    prompt = f"""
-Bạn là AI hỗ trợ phân tích ảnh/tài liệu.
-
-NHIỆM VỤ:
-- Trả lời dựa trên ảnh được cung cấp.
-- Nếu ảnh là ECG/điện tim, chỉ mô tả những gì quan sát được.
-- Không chẩn đoán y khoa chắc chắn.
-- Không khẳng định bệnh lý chắc chắn.
-- Nếu ảnh mờ hoặc thiếu thông tin, nói rõ hạn chế.
-- Trả lời bằng tiếng Việt, ngắn gọn.
-
-CÂU HỎI:
-{question}
-"""
-
-    response = model.generate_content([prompt, *images])
-    answer = getattr(response, "text", "") or ""
-
-    if not answer.strip():
-        raise Exception("Gemini Vision không trả về nội dung.")
-
-    return answer.strip()
-
-
-def clean_answer(text):
-    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
-    text = re.sub(r"\s+\.", ".", text)
-    text = re.sub(r"\s+,", ",", text)
-    return text.strip()
-
-
-def build_prompt(question, context_text):
-    return f"""
-Bạn là AI chuyên phân tích tài liệu.
-
-NHIỆM VỤ:
-- Chỉ trả lời dựa trên CONTEXT được cung cấp.
-- Không được bịa thông tin ngoài tài liệu.
-- Nếu thiếu thông tin, nói rõ tài liệu không cung cấp.
-- Không hiển thị SOURCE.
-- Trả lời ngắn gọn, tối đa 500 từ.
-
-FORMAT:
-- Dùng markdown.
-- Có tiêu đề nhỏ.
-- Có bullet point.
-- Có phần "Kết luận ngắn".
-
-Nếu tài liệu không có thông tin để trả lời:
-"Tôi không tìm thấy thông tin này trong tài liệu."
-
-QUESTION:
-{question}
-
-CONTEXT:
-{context_text}
-"""
-
-
-def ask_gemini(question, context_text):
-    model = genai.GenerativeModel(MODEL_NAME)
-    prompt = build_prompt(question, context_text)
-
-    retries = 3
-
-    for attempt in range(retries):
-        try:
-            response = model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.25,
-                    "max_output_tokens": MAX_OUTPUT_TOKENS,
-                },
-                stream=False,
-            )
-
-            answer = getattr(response, "text", "") or ""
-            answer = clean_answer(answer)
-
-            if answer.strip():
-                return answer
-
-            raise Exception("Gemini không trả về nội dung.")
-
-        except Exception as e:
-            error_text = str(e)
-
-            if "503" in error_text or "overloaded" in error_text.lower():
-                wait_time = 2 * (attempt + 1)
-                st.warning(f"Gemini đang quá tải. Đang thử lại sau {wait_time}s...")
-                time.sleep(wait_time)
-                continue
-
-            if "429" in error_text:
-                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ.")
-
-            if "403" in error_text:
-                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
-
-            raise e
-
-    raise Exception("Gemini quá tải sau nhiều lần thử.")
-
-
-# =========================
-# FILE PARSING
+# FILE PARSING & CHUNKING
 # =========================
 
 def get_file_hash(file_bytes):
@@ -315,7 +337,6 @@ def get_file_hash(file_bytes):
 def save_uploaded_file(uploaded_file):
     file_bytes = uploaded_file.getvalue()
     file_hash = get_file_hash(file_bytes)
-
     safe_name = uploaded_file.name.replace("/", "_").replace("\\", "_")
     save_path = UPLOADS_DIR / f"{file_hash[:10]}_{safe_name}"
 
@@ -327,7 +348,6 @@ def save_uploaded_file(uploaded_file):
 
 def split_text(text, chunk_size=1000, overlap=120):
     text = text.strip()
-
     if not text:
         return []
 
@@ -339,7 +359,6 @@ def split_text(text, chunk_size=1000, overlap=120):
 
     for para in paragraphs:
         para = para.strip()
-
         if not para:
             continue
 
@@ -351,12 +370,10 @@ def split_text(text, chunk_size=1000, overlap=120):
 
             if len(para) > chunk_size:
                 start = 0
-
                 while start < len(para):
                     end = start + chunk_size
                     chunks.append(para[start:end].strip())
                     start = max(end - overlap, start + 1)
-
                 current_chunk = ""
             else:
                 current_chunk = para
@@ -367,15 +384,38 @@ def split_text(text, chunk_size=1000, overlap=120):
     return chunks
 
 
-def extract_pdf_text(pdf_path):
+def extract_pdf_text_and_images(pdf_path, uploads_dir):
+    """
+    Extracts text page-by-page.
+    If a page is scanned (no text), extracts images embedded in the page for Vision OCR.
+    """
     reader = PdfReader(str(pdf_path))
     nodes = []
     counter = 0
+    scanned_pages = []
 
     for page_index, page in enumerate(reader.pages, start=1):
         page_text = page.extract_text() or ""
-        chunks = split_text(page_text)
+        
+        # Detect potential scanned page
+        if not page_text.strip() or len(page_text.strip()) < 50:
+            scanned_pages.append(page_index)
+            # Try to extract page images
+            for img_idx, img_file in enumerate(page.images, start=1):
+                try:
+                    img_bytes = img_file.data
+                    # Clean filename format
+                    ext = Path(img_file.name).suffix or ".png"
+                    img_name = f"{pdf_path.stem}_page{page_index}_img{img_idx}{ext}"
+                    img_path = uploads_dir / img_name
+                    img_path.write_bytes(img_bytes)
 
+                    if str(img_path) not in st.session_state.pdf_extracted_images:
+                        st.session_state.pdf_extracted_images.append(str(img_path))
+                except Exception:
+                    pass
+        
+        chunks = split_text(page_text)
         for chunk_index, chunk in enumerate(chunks, start=1):
             counter += 1
             nodes.append({
@@ -388,7 +428,7 @@ def extract_pdf_text(pdf_path):
                 "text": chunk,
             })
 
-    return nodes
+    return nodes, scanned_pages
 
 
 def extract_txt_nodes(file_path):
@@ -426,7 +466,6 @@ def extract_markdown_nodes(md_text):
             continue
 
         match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
-
         if match:
             nodes.append({
                 "title": match.group(2).strip(),
@@ -523,7 +562,8 @@ def parse_document(file_path):
     suffix = file_path.suffix.lower()
 
     if suffix == ".pdf":
-        return extract_pdf_text(file_path)
+        # Handled in higher-level loop to handle image extraction
+        return extract_pdf_text_and_images(file_path, UPLOADS_DIR)[0]
 
     if suffix in [".md", ".markdown"]:
         return parse_markdown(file_path)
@@ -534,17 +574,9 @@ def parse_document(file_path):
     return []
 
 
-@st.cache_data(show_spinner=False)
-def parse_uploaded_files_cached(file_paths):
-    all_nodes = []
-
-    for file_path_str in file_paths:
-        file_path = Path(file_path_str)
-        nodes = parse_document(file_path)
-        all_nodes.extend(nodes)
-
-    return all_nodes
-
+# =========================
+# KEYWORD & SEMANTIC RAG RETRIEVAL
+# =========================
 
 def normalize_text(text):
     text = text.lower()
@@ -561,20 +593,18 @@ def keyword_score(question, text, title=""):
         return 0
 
     score = 0
-
     for word in q_words:
         if word in content:
             score += 2
 
     question_norm = normalize_text(question)
-
     if question_norm and question_norm in content:
         score += 5
 
     return score
 
 
-def select_relevant_nodes(question, nodes, top_k=TOP_K):
+def select_relevant_nodes(question, nodes, top_k):
     if not nodes:
         return []
 
@@ -595,295 +625,535 @@ def select_relevant_nodes(question, nodes, top_k=TOP_K):
     return selected[:top_k]
 
 
+# Semantic Embeddings RAG
+def get_embeddings_for_nodes(nodes, api_key):
+    """
+    Fetch vector embeddings for nodes in batches using models/text-embedding-004
+    Caches results inside st.session_state.node_embeddings.
+    """
+    genai.configure(api_key=api_key)
+    uncached_nodes = [n for n in nodes if n["node_id"] not in st.session_state.node_embeddings]
+    
+    if uncached_nodes:
+        try:
+            batch_size = 50
+            for i in range(0, len(uncached_nodes), batch_size):
+                batch = uncached_nodes[i:i+batch_size]
+                texts = [n["text"] for n in batch]
+                
+                result = genai.embed_content(
+                    model="models/text-embedding-004",
+                    content=texts,
+                    task_type="retrieval_document"
+                )
+                
+                for idx, node in enumerate(batch):
+                    st.session_state.node_embeddings[node["node_id"]] = result["embedding"][idx]
+        except Exception as e:
+            st.error(f"Lỗi tạo Vector Embeddings từ Gemini API: {e}. Vui lòng thử lại hoặc dùng chế độ Keyword Search.")
+            return {}
+
+    return st.session_state.node_embeddings
+
+
+def cosine_similarity(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    norm = np.linalg.norm(a) * np.linalg.norm(b)
+    if norm == 0:
+        return 0
+    return np.dot(a, b) / norm
+
+
+def select_relevant_nodes_semantic(question, nodes, top_k, api_key):
+    """
+    Retrieves nodes using semantic similarity. 
+    Fallbacks to keyword search if errors occur or quota is exceeded.
+    """
+    if not nodes:
+        return []
+
+    embeddings = get_embeddings_for_nodes(nodes, api_key)
+    if not embeddings:
+        st.warning("⚠️ Lỗi trích xuất Vector, tự động fallback sang Tìm kiếm từ khóa cục bộ.")
+        return select_relevant_nodes(question, nodes, top_k)
+
+    try:
+        genai.configure(api_key=api_key)
+        q_result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=question,
+            task_type="retrieval_query"
+        )
+        q_emb = q_result["embedding"]
+
+        scored_nodes = []
+        for node in nodes:
+            node_id = node["node_id"]
+            if node_id in embeddings:
+                score = cosine_similarity(q_emb, embeddings[node_id])
+                scored_nodes.append((node, score))
+
+        scored_nodes.sort(key=lambda x: x[1], reverse=True)
+        return [item[0] for item in scored_nodes[:top_k]]
+
+    except Exception as e:
+        st.warning(f"⚠️ Lỗi Tìm kiếm ngữ nghĩa ({e}), tự động fallback sang Tìm kiếm từ khóa cục bộ.")
+        return select_relevant_nodes(question, nodes, top_k)
+
+
 def build_context(selected_nodes):
     return "\n\n".join([n.get("text", "") for n in selected_nodes])
 
 
 # =========================
-# CSS
+# GEMINI API WRAPPERS
 # =========================
 
-st.markdown(
-    """
-<style>
-.block-container{
-    max-width:1200px;
-    padding-top:32px;
-}
+def ask_gemini_vision(question, image_paths, model_name, api_key):
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+    images = []
 
-.stButton button{
-    width:100%;
-    height:48px;
-    border-radius:14px;
-    font-size:15px;
-    font-weight:700;
-}
+    for image_path in image_paths:
+        try:
+            image = Image.open(image_path).convert("RGB")
+            images.append(image)
+        except Exception:
+            pass
 
-.answer-box{
-    padding:24px;
-    border-radius:18px;
-    background:#111827;
-    border:1px solid #374151;
-    margin-top:10px;
-    line-height:1.7;
-}
+    if not images:
+        raise Exception("Không mở được các ảnh yêu cầu để Gemini Vision phân tích.")
 
-.history-box{
-    padding:12px;
-    border-radius:12px;
-    margin-bottom:8px;
-    background:#111827;
-    border:1px solid #374151;
-    font-size:14px;
-}
+    prompt = f"""
+Bạn là AI hỗ trợ phân tích ảnh/tài liệu.
 
-.small-muted{
-    opacity:0.75;
-    font-size:13px;
-}
+NHIỆM VỤ:
+- Trả lời dựa trên ảnh được cung cấp.
+- Nếu ảnh là ECG/điện tim, chỉ mô tả những gì quan sát được.
+- Không tự ý đưa ra chẩn đoán y khoa chắc chắn.
+- Không khẳng định bệnh lý chắc chắn khi không đủ dữ kiện.
+- Nếu ảnh mờ hoặc thiếu thông tin, nói rõ hạn chế của ảnh.
+- Trả lời trực quan bằng tiếng Việt ngắn gọn.
 
-img{
-    border-radius:10px;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
+CÂU HỎI:
+{question}
+"""
+
+    response = model.generate_content([prompt, *images])
+    answer = getattr(response, "text", "") or ""
+
+    if not answer.strip():
+        raise Exception("Gemini Vision không trả về nội dung trả lời nào.")
+
+    return answer.strip()
 
 
-# =========================
-# SIDEBAR
-# =========================
+def clean_answer(text):
+    text = re.sub(r"\[SOURCE\s*\d+\]", "", text)
+    text = re.sub(r"\s+\.", ".", text)
+    text = re.sub(r"\s+,", ",", text)
+    return text.strip()
 
-with st.sidebar:
-    st.title("📚 Lịch sử")
 
-    st.success("Xử lý ảnh: OpenCV local")
+def build_prompt(question, context_text):
+    return f"""
+Bạn là AI chuyên phân tích tài liệu.
 
-    if st.button("🗑️ Xóa lịch sử"):
-        st.session_state.messages = []
-        st.session_state.question_history = []
-        st.session_state.last_context = ""
-        st.cache_data.clear()
-        st.rerun()
+NHIỆM VỤ:
+- Chỉ trả lời dựa trên CONTEXT được cung cấp.
+- Không được bịa thông tin ngoài tài liệu.
+- Nếu thiếu thông tin để làm rõ câu hỏi, nói rõ tài liệu không cung cấp.
+- Không hiển thị SOURCE.
+- Trả lời ngắn gọn, tối đa 500 từ.
 
-    st.markdown("---")
+FORMAT:
+- Dùng markdown.
+- Có tiêu đề nhỏ.
+- Có bullet point.
+- Có phần "Kết luận ngắn".
 
-    history_list = st.session_state.get("question_history", [])
+Nếu tài liệu không có thông tin để trả lời:
+"Tôi không tìm thấy thông tin này trong tài liệu."
 
-    if history_list:
-        for i, q in enumerate(history_list[::-1], start=1):
-            st.markdown(
-                f"""
-<div class="history-box">
-<b>{i}.</b> {q}
-</div>
-""",
-                unsafe_allow_html=True,
+QUESTION:
+{question}
+
+CONTEXT:
+{context_text}
+"""
+
+
+def ask_gemini(question, context_text, model_name, temp, max_tokens, api_key):
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+    prompt = build_prompt(question, context_text)
+
+    retries = 3
+    for attempt in range(retries):
+        try:
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": temp,
+                    "max_output_tokens": max_tokens,
+                },
+                stream=False,
             )
-    else:
-        st.markdown(
-            """
-<div class="history-box">
-Chưa có câu hỏi nào
-</div>
-""",
-            unsafe_allow_html=True,
-        )
+
+            answer = getattr(response, "text", "") or ""
+            answer = clean_answer(answer)
+
+            if answer.strip():
+                return answer
+
+            raise Exception("Gemini không trả về nội dung.")
+
+        except Exception as e:
+            error_text = str(e)
+            if "503" in error_text or "overloaded" in error_text.lower():
+                wait_time = 2 * (attempt + 1)
+                st.warning(f"Mô hình Gemini đang quá tải. Đang thử lại tự động sau {wait_time}s...")
+                time.sleep(wait_time)
+                continue
+            if "429" in error_text:
+                raise Exception("Gemini đã hết quota hoặc bị giới hạn tốc độ (Rate Limit 429).")
+            if "403" in error_text:
+                raise Exception("API key hoặc project Gemini chưa có quyền truy cập model này.")
+            raise e
+
+    raise Exception("Mô hình Gemini phản hồi quá tải sau nhiều lần thử lại.")
 
 
 # =========================
-# MAIN UI
+# MAIN APP INTERFACE
 # =========================
 
-st.title("📄 DocAnalyzer AI")
-st.caption("Chat với PDF, Markdown, TXT và ảnh bằng Gemini + OpenCV local")
+st.title("📄 DocAnalyzer AI Pro")
+st.caption("Trò chuyện thông minh cùng tài liệu và hình ảnh bằng Gemini RAG & OpenCV Local")
 
-with st.expander("⚙️ Cài đặt xử lý ảnh", expanded=True):
+# 1. Image Enhancement Settings Expander
+with st.expander("⚙️ Thiết lập tăng cường hình ảnh OpenCV", expanded=True):
     col_a, col_b = st.columns([2, 1])
-
     with col_a:
         process_mode_label = st.radio(
-            "Chọn chế độ xử lý ảnh",
-            ["Nhanh", "Cân bằng", "Rõ nét cao"],
+            "Chọn chế độ tăng nét OpenCV",
+            ["Nhanh (CLAHE + Sharp 2D)", "Cân bằng (Gray + Gaussian + Unsharp)", "Rõ nét cao (Bilateral Filter Edge)"],
             horizontal=True,
         )
-
     with col_b:
         enable_enhance = st.toggle(
-            "Dùng OpenCV Enhance",
+            "Kích hoạt OpenCV Local Enhance",
             value=True,
         )
 
     mode_map = {
-        "Nhanh": "fast",
-        "Cân bằng": "balanced",
-        "Rõ nét cao": "high_quality",
+        "Nhanh (CLAHE + Sharp 2D)": "fast",
+        "Cân bằng (Gray + Gaussian + Unsharp)": "balanced",
+        "Rõ nét cao (Bilateral Filter Edge)": "high_quality",
     }
-
     process_mode = mode_map[process_mode_label]
 
-    if enable_enhance:
-        st.info(f"Đang bật xử lý ảnh bằng OpenCV. Chế độ: {process_mode_label}")
-    else:
-        st.warning("Đang tắt xử lý ảnh. Gemini sẽ dùng ảnh gốc.")
 
+# 2. File Uploader
 uploaded_files = st.file_uploader(
-    "📂 Tải tài liệu lên",
+    "📂 Tải tài liệu hoặc hình ảnh lên",
     type=["pdf", "md", "markdown", "txt", "png", "jpg", "jpeg"],
     accept_multiple_files=True,
 )
 
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
 
-question = st.chat_input("Hỏi nội dung tài liệu...")
+# =========================
+# IMMEDIATE UPLOAD PROCESSING (Solves Streamlit Rerun Bug)
+# =========================
+
+if uploaded_files:
+    saved_paths = []
+    image_paths = []
+    
+    # Calculate simple hash of uploaded files to detect structural changes
+    files_hash = hashlib.md5("".join([f.name for f in uploaded_files]).encode()).hexdigest()
+    if st.session_state.files_hash != files_hash:
+        # Reset intermediate states on structural file upload changes
+        st.session_state.files_hash = files_hash
+        st.session_state.parsed_nodes = []
+        st.session_state.processed_images = {}
+        st.session_state.pdf_extracted_images = []
+        st.session_state.node_embeddings = {}
+
+    for uploaded_file in uploaded_files:
+        file_path = save_uploaded_file(uploaded_file)
+        suffix = Path(file_path).suffix.lower()
+
+        if suffix in [".png", ".jpg", ".jpeg"]:
+            image_paths.append(str(file_path))
+            original_path_str = str(file_path)
+
+            # Process with OpenCV immediately and store globally
+            cache_key = f"{original_path_str}_{process_mode if enable_enhance else 'none'}"
+            if cache_key not in st.session_state.processed_images:
+                if enable_enhance:
+                    with st.spinner(f"⚡ Đang tăng nét ảnh {uploaded_file.name} bằng OpenCV..."):
+                        p_path, ok, msg = enhance_image_opencv(file_path, mode=process_mode)
+                        st.session_state.processed_images[cache_key] = {
+                            "processed_path": p_path,
+                            "ok": ok,
+                            "message": msg
+                        }
+                else:
+                    st.session_state.processed_images[cache_key] = {
+                        "processed_path": original_path_str,
+                        "ok": True,
+                        "message": "Đang dùng ảnh gốc."
+                    }
+        else:
+            saved_paths.append(str(file_path))
+
+    # Parse and index text documents
+    if saved_paths and not st.session_state.parsed_nodes:
+        with st.spinner("📖 Đang phân tích cấu trúc tài liệu..."):
+            all_nodes = []
+            scanned_pages_info = {}
+            
+            for path_str in saved_paths:
+                p_file = Path(path_str)
+                if p_file.suffix.lower() == ".pdf":
+                    nodes, scanned_pages = extract_pdf_text_and_images(p_file, UPLOADS_DIR)
+                    all_nodes.extend(nodes)
+                    if scanned_pages:
+                        scanned_pages_info[p_file.name] = scanned_pages
+                else:
+                    nodes = parse_document(p_file)
+                    all_nodes.extend(nodes)
+
+            st.session_state.parsed_nodes = all_nodes
+
+            # Show warnings for detected scanned pages
+            for doc_name, pages in scanned_pages_info.items():
+                st.warning(
+                    f"⚠️ Tài liệu `{doc_name}` phát hiện các trang chụp/quét (không có text): Trang {', '.join(map(str, pages))}. "
+                    "Hệ thống đã tự động trích xuất các hình ảnh trong trang để bạn gửi trực tiếp cho Gemini Vision!"
+                )
+
+    # 3. Persistent Preview Interface
+    all_cached_keys = list(st.session_state.processed_images.keys())
+    active_keys = [k for k in all_cached_keys if k.endswith(process_mode if enable_enhance else "none")]
+    extracted_pdf_imgs = st.session_state.pdf_extracted_images
+
+    if active_keys or extracted_pdf_imgs:
+        with st.expander("🖼️ Khu vực kiểm duyệt & xem thử hình ảnh (Không mất khi chat)", expanded=True):
+            # Render standard uploaded images
+            for k in active_keys:
+                img_data = st.session_state.processed_images[k]
+                orig_path = k.rsplit("_", 1)[0]
+                proc_path = img_data["processed_path"]
+
+                st.markdown(f"**📸 Hình ảnh:** `{Path(orig_path).name}`")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.image(orig_path, caption="Ảnh gốc chưa xử lý", use_container_width=True)
+                with col2:
+                    st.image(proc_path, caption=f"Ảnh sau xử lý (Chế độ: {process_mode_label if enable_enhance else 'Gốc'})", use_container_width=True)
+                    # Safe Download Button
+                    try:
+                        with open(proc_path, "rb") as f:
+                            st.download_button(
+                                label="⬇️ Tải ảnh đã xử lý",
+                                data=f,
+                                file_name=Path(proc_path).name,
+                                mime=get_mime_type(proc_path),
+                                key=f"dl_{hashlib.md5(proc_path.encode()).hexdigest()}"
+                            )
+                    except Exception:
+                        pass
+                st.markdown("---")
+
+            # Render extracted images from scanned PDFs
+            if extracted_pdf_imgs:
+                st.markdown("**📂 Hình ảnh tự động trích xuất từ PDF quét:**")
+                grid_cols = st.columns(min(3, len(extracted_pdf_imgs)))
+                for idx, ext_path in enumerate(extracted_pdf_imgs):
+                    target_col = grid_cols[idx % len(grid_cols)]
+                    with target_col:
+                        # Process extracted PDF images through OpenCV too
+                        pdf_cache_key = f"{ext_path}_{process_mode if enable_enhance else 'none'}"
+                        if pdf_cache_key not in st.session_state.processed_images:
+                            if enable_enhance:
+                                p_path, ok, _ = enhance_image_opencv(Path(ext_path), mode=process_mode)
+                                st.session_state.processed_images[pdf_cache_key] = {
+                                    "processed_path": p_path,
+                                    "ok": ok,
+                                    "message": ""
+                                }
+                            else:
+                                st.session_state.processed_images[pdf_cache_key] = {
+                                    "processed_path": ext_path,
+                                    "ok": True,
+                                    "message": ""
+                                }
+                        
+                        disp_img = st.session_state.processed_images[pdf_cache_key]["processed_path"]
+                        st.image(disp_img, caption=f"PDF Extracted - {Path(ext_path).name}", use_container_width=True)
 
 
 # =========================
-# MAIN FLOW
+# CHAT FLOW & RENDERING
+# =========================
+
+# Render Historical Messages
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        if msg["role"] == "user":
+            if "images" in msg and msg["images"]:
+                cols = st.columns(min(4, len(msg["images"])))
+                for i, img_path in enumerate(msg["images"]):
+                    with cols[i % len(cols)]:
+                        st.image(img_path, caption="Ảnh gửi kèm", use_container_width=True)
+            st.markdown(f'<div class="chat-bubble-user">{msg["content"]}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f'<div class="chat-bubble-assistant">'
+                f'<div class="answer-header">🤖 Trợ lý AI</div>'
+                f'{msg["content"]}'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+# Input
+question = st.chat_input("Hỏi nội dung tài liệu hoặc hình ảnh...")
+
+
+# =========================
+# QUERY EXECUTION
 # =========================
 
 if question:
     if not uploaded_files:
-        st.warning("Vui lòng upload tài liệu.")
+        st.warning("⚠️ Vui lòng tải tài liệu hoặc hình ảnh lên trước.")
         st.stop()
 
-    st.session_state.messages.append({"role": "user", "content": question})
+    # Collect active images (uploaded images + extracted PDF images)
+    active_query_images = []
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            file_path = save_uploaded_file(uploaded_file)
+            suffix = Path(file_path).suffix.lower()
+            if suffix in [".png", ".jpg", ".jpeg"]:
+                cache_key = f"{str(file_path)}_{process_mode if enable_enhance else 'none'}"
+                if cache_key in st.session_state.processed_images:
+                    active_query_images.append(st.session_state.processed_images[cache_key]["processed_path"])
+                else:
+                    active_query_images.append(str(file_path))
+
+    if st.session_state.pdf_extracted_images:
+        for ext_path in st.session_state.pdf_extracted_images:
+            cache_key = f"{ext_path}_{process_mode if enable_enhance else 'none'}"
+            if cache_key in st.session_state.processed_images:
+                active_query_images.append(st.session_state.processed_images[cache_key]["processed_path"])
+            else:
+                active_query_images.append(ext_path)
+
+    # Record User Message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": question,
+        "images": active_query_images
+    })
 
     if question not in st.session_state.question_history:
         st.session_state.question_history.append(question)
 
-    with st.chat_message("user"):
-        st.markdown(question)
+    st.rerun()  # Rerun immediately to display user bubble before invoking LLM
 
-    with st.spinner("📖 Đang xử lý tài liệu..."):
-        saved_paths = []
-        image_paths_for_vision = []
 
-        for uploaded_file in uploaded_files:
-            file_path = save_uploaded_file(uploaded_file)
-            suffix = Path(file_path).suffix.lower()
-
-            if suffix in [".png", ".jpg", ".jpeg"]:
-                original_path = str(file_path)
-
-                if enable_enhance:
-                    processed_path, ok, message = enhance_image_opencv(
-                        image_path=file_path,
-                        mode=process_mode,
-                    )
-
-                    if not ok:
-                        processed_path = original_path
-                else:
-                    processed_path = original_path
-                    ok = True
-                    message = "Đang dùng ảnh gốc."
-
-                st.subheader("🖼️ Kết quả xử lý ảnh")
-                col1, col2 = st.columns(2)
-
-                with col1:
-                    st.markdown("### Ảnh gốc")
-                    st.image(original_path, width=600)
-
-                with col2:
-                    if enable_enhance:
-                        st.markdown("### Ảnh đã xử lý bằng OpenCV")
-                    else:
-                        st.markdown("### Ảnh đang dùng")
-
-                    st.image(processed_path, width=600)
-
-                    try:
-                        with open(processed_path, "rb") as f:
-                            st.download_button(
-                                label="⬇️ Tải ảnh đã xử lý",
-                                data=f,
-                                file_name=Path(processed_path).name,
-                                mime=get_mime_type(processed_path),
-                            )
-                    except Exception:
-                        st.warning("Không thể tạo nút tải ảnh.")
-
-                if ok:
-                    st.success(message)
-                else:
-                    st.warning(message)
-                    st.info("OpenCV lỗi nên Gemini sẽ dùng ảnh gốc để phân tích.")
-
-                image_paths_for_vision.append(processed_path)
-
-            else:
-                saved_paths.append(str(file_path))
-
-        all_nodes = parse_uploaded_files_cached(tuple(saved_paths))
-
-    if not all_nodes:
-        if image_paths_for_vision:
-            with st.chat_message("assistant"):
-                try:
-                    with st.spinner("🤖 Gemini Vision đang phân tích ảnh..."):
-                        vision_answer = ask_gemini_vision(question, image_paths_for_vision)
-
-                    st.markdown(
-                        f"""
-<div class="answer-box">
-
-{vision_answer}
-
-</div>
-""",
-                        unsafe_allow_html=True,
-                    )
-
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": vision_answer,
-                    })
-
-                except Exception as e:
-                    st.error(f"Lỗi Gemini Vision: {e}")
-
-            st.stop()
-
-        st.error("Không đọc được nội dung tài liệu.")
-        st.stop()
-
-    selected_nodes = select_relevant_nodes(
-        question=question,
-        nodes=all_nodes,
-        top_k=TOP_K,
-    )
-
-    context_text = build_context(selected_nodes)
-    st.session_state.last_context = context_text
+# Invoke LLM (Triggered if the last message belongs to user)
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    user_msg = st.session_state.messages[-1]
+    user_question = user_msg["content"]
+    user_images = user_msg.get("images", [])
 
     with st.chat_message("assistant"):
-        try:
-            with st.spinner("🤖 Gemini đang trả lời..."):
-                answer = ask_gemini(question, context_text)
+        # 1. RAG Text Document Search
+        if st.session_state.parsed_nodes:
+            with st.spinner("🤖 Đang quét tài liệu tìm ngữ cảnh phù hợp..."):
+                if search_mode == "Semantic Search (Gemini Embeddings)":
+                    selected_nodes = select_relevant_nodes_semantic(
+                        question=user_question,
+                        nodes=st.session_state.parsed_nodes,
+                        top_k=top_k_val,
+                        api_key=api_key_input
+                    )
+                else:
+                    selected_nodes = select_relevant_nodes(
+                        question=user_question,
+                        nodes=st.session_state.parsed_nodes,
+                        top_k=top_k_val
+                    )
 
-            st.markdown(
-                f"""
-<div class="answer-box">
+                context_text = build_context(selected_nodes)
+                st.session_state.last_context = context_text
 
-{answer}
+            with st.spinner("🤖 Gemini đang suy luận và lập luận văn bản..."):
+                try:
+                    answer = ask_gemini(
+                        question=user_question,
+                        context_text=context_text,
+                        model_name=model_choice,
+                        temp=temperature,
+                        max_tokens=max_output_tokens,
+                        api_key=api_key_input
+                    )
+                except Exception as e:
+                    answer = f"❌ Lỗi truy vấn Gemini: {e}"
 
-</div>
-""",
-                unsafe_allow_html=True,
-            )
+        # 2. Vision Only OCR
+        elif user_images:
+            with st.spinner("🤖 Gemini Vision đang phân tích hình ảnh..."):
+                try:
+                    answer = ask_gemini_vision(
+                        question=user_question,
+                        image_paths=user_images,
+                        model_name=model_choice,
+                        api_key=api_key_input
+                    )
+                except Exception as e:
+                    answer = f"❌ Lỗi phân tích ảnh bằng Gemini Vision: {e}"
+        else:
+            answer = "❌ Không tìm thấy văn bản tài liệu hay hình ảnh hợp lệ để phân tích."
 
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": answer,
-            })
+        # Display Answer using premium bubbles
+        st.markdown(
+            f'<div class="chat-bubble-assistant">'
+            f'<div class="answer-header">🤖 Trợ lý AI</div>'
+            f'{answer}'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
-        except Exception as e:
-            st.error(f"Lỗi Gemini: {e}")
+        # Save assistant message
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": answer
+        })
 
-    with st.expander("📚 Xem context đã dùng"):
-        st.code(context_text)
+        # Context inspection expander
+        if st.session_state.parsed_nodes and st.session_state.last_context:
+            with st.expander("📚 Xem context đã trích xuất"):
+                st.code(st.session_state.last_context)
+                
+        st.rerun()  # Rerun to sync final state and reset chat input trigger
+
+
+# =========================
+# LỊCH SỬ SIDEBAR PANEL RENDERING
+# =========================
+
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("📚 Nhật ký câu hỏi")
+    hist = st.session_state.get("question_history", [])
+    if hist:
+        for idx, q_text in enumerate(hist[::-1], start=1):
+            st.markdown(f'<div class="history-box"><b>{idx}.</b> {q_text}</div>', unsafe_allow_html=True)
+    else:
+        st.markdown('<div class="history-box">Chưa có câu hỏi nào</div>', unsafe_allow_html=True)
