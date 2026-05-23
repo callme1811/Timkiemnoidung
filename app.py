@@ -267,63 +267,57 @@ def opencv_fast_enhance(img):
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
 
-    clahe = cv2.createCLAHE(clipLimit=1.8, tileGridSize=(8, 8))
-    l2 = clahe.apply(l)
+    # Tăng cường độ tương phản cục bộ vừa phải trên kênh độ sáng (L)
+    clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
+    l_clahe = clahe.apply(l)
 
-    enhanced = cv2.merge((l2, a, b))
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+    # Làm nét dịu nhẹ (Unsharp Mask) trên kênh L để tránh làm nhiễu màu sắc
+    blur = cv2.GaussianBlur(l_clahe, (5, 5), 0)
+    l_sharpen = cv2.addWeighted(l_clahe, 1.3, blur, -0.3, 0)
 
-    kernel = np.array([
-        [0, -1, 0],
-        [-1, 5, -1],
-        [0, -1, 0],
-    ])
-    return cv2.filter2D(enhanced, -1, kernel)
+    enhanced = cv2.merge((l_sharpen, a, b))
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
 def opencv_balanced_enhance(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(
-        clipLimit=1.5,
-        tileGridSize=(8, 8)
-    )
-    contrast = clahe.apply(gray)
-    blur = cv2.GaussianBlur(contrast, (0, 0), 0.6)
-    sharpen = cv2.addWeighted(
-        contrast,
-        1.4,
-        blur,
-        -0.4,
-        0
-    )
-    return cv2.cvtColor(sharpen, cv2.COLOR_GRAY2BGR)
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    # Cân bằng độ tương phản kênh sáng (L)
+    clahe = cv2.createCLAHE(clipLimit=1.3, tileGridSize=(8, 8))
+    l_clahe = clahe.apply(l)
+
+    # Bộ lọc Bilateral để làm mịn các kết cấu nền (nhiễu hạt/đường lưới) nhưng giữ nguyên biên cạnh
+    l_smooth = cv2.bilateralFilter(l_clahe, d=5, sigmaColor=15, sigmaSpace=15)
+
+    # Làm nét mềm mại
+    blur = cv2.GaussianBlur(l_smooth, (0, 0), 0.6)
+    l_sharpen = cv2.addWeighted(l_smooth, 1.4, blur, -0.4, 0)
+
+    enhanced = cv2.merge((l_sharpen, a, b))
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
 def opencv_high_quality_enhance(img):
     """
-    ECG/document optimized filters.
+    ECG/document optimized filters: Giữ nét chính, triệt tiêu lưới sọc nền tần số cao.
     """
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    clahe = cv2.createCLAHE(
-        clipLimit=1.8,
-        tileGridSize=(8, 8)
-    )
-    contrast = clahe.apply(gray)
-    blur = cv2.GaussianBlur(contrast, (0, 0), 0.8)
-    sharpen = cv2.addWeighted(
-        contrast,
-        1.6,
-        blur,
-        -0.6,
-        0
-    )
-    final = cv2.bilateralFilter(
-        sharpen,
-        d=5,
-        sigmaColor=25,
-        sigmaSpace=25
-    )
-    return cv2.cvtColor(final, cv2.COLOR_GRAY2BGR)
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+
+    # Tăng tương phản thông minh
+    clahe = cv2.createCLAHE(clipLimit=1.4, tileGridSize=(8, 8))
+    l_clahe = clahe.apply(l)
+
+    # Tăng mạnh Bilateral Filter trên kênh L để làm mờ lưới ECG màu nhạt, chỉ giữ lại đường ECG đậm nét
+    l_smooth = cv2.bilateralFilter(l_clahe, d=7, sigmaColor=25, sigmaSpace=25)
+
+    # Làm nét unsharp mask
+    blur = cv2.GaussianBlur(l_smooth, (0, 0), 1.0)
+    l_sharpen = cv2.addWeighted(l_smooth, 1.5, blur, -0.5, 0)
+
+    enhanced = cv2.merge((l_sharpen, a, b))
+    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
 # =========================
@@ -896,12 +890,14 @@ if uploaded_files:
                     with st.spinner(f"⚡ Đang tăng nét ảnh {uploaded_file.name} bằng OpenCV..."):
                         p_path, ok, msg = enhance_image_opencv(file_path, mode=process_mode)
                         st.session_state.processed_images[cache_key] = {
+                            "original_path": original_path_str,
                             "processed_path": p_path,
                             "ok": ok,
                             "message": msg
                         }
                 else:
                     st.session_state.processed_images[cache_key] = {
+                        "original_path": original_path_str,
                         "processed_path": original_path_str,
                         "ok": True,
                         "message": "Đang dùng ảnh gốc."
@@ -945,7 +941,7 @@ if uploaded_files:
             # Render standard uploaded images
             for k in active_keys:
                 img_data = st.session_state.processed_images[k]
-                orig_path = k.rsplit("_", 1)[0]
+                orig_path = img_data.get("original_path", k.rsplit("_", 1)[0])
                 proc_path = img_data["processed_path"]
 
                 st.markdown(f"**📸 Hình ảnh:** `{Path(orig_path).name}`")
@@ -981,12 +977,14 @@ if uploaded_files:
                             if enable_enhance:
                                 p_path, ok, _ = enhance_image_opencv(Path(ext_path), mode=process_mode)
                                 st.session_state.processed_images[pdf_cache_key] = {
+                                    "original_path": ext_path,
                                     "processed_path": p_path,
                                     "ok": ok,
                                     "message": ""
                                 }
                             else:
                                 st.session_state.processed_images[pdf_cache_key] = {
+                                    "original_path": ext_path,
                                     "processed_path": ext_path,
                                     "ok": True,
                                     "message": ""
