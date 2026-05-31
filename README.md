@@ -1,14 +1,13 @@
 # 📄 DocAnalyzer AI Pro
 
 <p align="center">
-  <b>A state-of-the-art document & ECG image analysis platform using Streamlit, Gemini, and OpenCV.</b>
+  <b>A state-of-the-art document & scanned PDF analysis platform using Streamlit and Google Gemini.</b>
 </p>
 
 <p align="center">
   <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python" alt="Python"></a>
   <a href="https://streamlit.io/"><img src="https://img.shields.io/badge/Streamlit-App-red?style=for-the-badge&logo=streamlit" alt="Streamlit"></a>
   <a href="https://ai.google.dev/"><img src="https://img.shields.io/badge/Gemini-AI%20Pro-orange?style=for-the-badge&logo=google-gemini" alt="Gemini"></a>
-  <a href="https://opencv.org/"><img src="https://img.shields.io/badge/OpenCV-Computer%20Vision-green?style=for-the-badge&logo=opencv" alt="OpenCV"></a>
 </p>
 
 ---
@@ -24,14 +23,9 @@
 * **Automatic Page Detection:** Scans uploaded PDF files page-by-page. If a page contains non-extractable text (scanned page/image PDF), the app automatically triggers the image parsing module.
 * **Zero-Dependency Extraction:** Extracts raw embedded images on scanned pages using pure Python `pypdf.page.images`, saving them locally to be passed directly to **Gemini Vision** for multi-modal analysis (requires no complex C++ binaries like Poppler).
 
-### 🖼️ Advanced LAB-Space OpenCV Enhancements
-* **Chromatic Preservation (LAB Space):** Converts images to **LAB Color Space** to isolate Luminance (L) from color coordinates (A, B). This keeps red/pink grid lines of medical graph papers (such as ECG grids) from muddying or turning black, preserving the color layer.
-* **Bilateral Grid Removal:** Employs selective **Bilateral Filtering** on the luminance channel to smooth out fine high-frequency repeating noise patterns (the graph grid) while locking in and sharpening the main wave traces or document text.
-* **Unsharp Masking:** Applies gentle Gaussian Blurring and weighted blending on the luminance channel to produce ultra-crisp wave details and readable text.
-
 ### ⚡ Persistent Streamlit State Architecture
-* **Decoupled Upload & Processing:** Uploading and OpenCV enhancement are performed instantly upon upload and kept cached in `st.session_state`.
-* **Safe Rerun Preservation:** Uploaded files, preview comparisons, and download buttons remain persistent on the screen, solving Streamlit's rerun state bug when typing in chat or clicking download.
+* **Decoupled Upload & Processing:** Uploaded images and documents are processed instantly upon upload and kept cached in `st.session_state`.
+* **Safe Rerun Preservation:** Uploaded files, preview images, and custom parameters remain persistent on the screen, solving Streamlit's rerun state bug when typing in chat.
 * **Bubble-integrated Media Support:** Images sent in chat are saved into the chat history state and rendered inside the user's glassmorphism bubble for an intuitive message thread.
 
 ### 🎨 Premium Glassmorphic UI/UX
@@ -45,7 +39,7 @@
 
 * **Front-end / Framework:** Streamlit
 * **AI & Language Models:** Google Generative AI (Gemini 2.5 Flash, Gemini 1.5 Pro)
-* **Image Processing:** OpenCV, Pillow, NumPy
+* **Image / File Manipulation:** Pillow, NumPy
 * **Document Parsing:** PyPDF
 * **Language:** Python 3.11
 
@@ -53,18 +47,11 @@
 
 # 🚀 Demo Overview
 
-## 1. ECG & Medical Graph Enhancement
+## Multi-modal Document Q&A
 
-| Feature | Original | OpenCV Enhanced (High Quality) |
-|---|---|---|
-| **Noise Profile** | Fine pink grids overlap dark traces, creating background clutter. | Pink grids are softened and isolated; dark waveforms are sharpened. |
-| **Color Fidelity** | Colors muddy when converted directly to grayscale. | Colors remain perfectly intact and separated using LAB-space processing. |
-
-## 2. Advanced Multi-modal Document Q&A
-
-1. **Upload Documents:** Txt, Markdown, or PDF (standard or scanned).
-2. **Select Search Method:** Choose Semantic Search for advanced synonyms or Keyword Search for local indexing.
-3. **Ask anything:** AI extracts the exact contexts, provides structured answers in beautiful Markdown, and shows the exact citation context in an expander.
+1. **Upload Documents & Images:** Upload text documents, Markdown, standard PDFs, scanned PDFs, or standalone images.
+2. **Select Search Method:** Choose Semantic Search for advanced vector matching or Keyword Search for local keyword-based matching.
+3. **Ask anything:** AI extracts the relevant context, answers with rich structured Markdown, and renders citations dynamically. Images are passed directly to Gemini Vision for complete multi-modal analysis.
 
 ---
 
@@ -72,10 +59,11 @@
 
 ```bash
 docanalyzer_ai/
-├── app.py               # Re-engineered premium Streamlit codebase
+├── app.py               # Re-engineered premium Streamlit codebase using Gemini
 ├── requirements.txt     # Dependency definition
 ├── runtime.txt          # Python runtime definition (for Streamlit Community Cloud)
-├── uploads/             # Temporary folder for file uploads and CV2 enhancements
+├── uploads/             # Temporary folder for file uploads and extracted images
 ├── .streamlit/
 │   └── secrets.toml     # File for storing API keys securely
 └── README.md            # Comprehensive documentation
+```
