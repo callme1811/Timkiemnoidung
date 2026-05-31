@@ -3,7 +3,6 @@ import time
 import hashlib
 from pathlib import Path
 
-import cv2
 import numpy as np
 import streamlit as st
 import google.generativeai as genai
@@ -220,104 +219,7 @@ with st.sidebar:
         st.rerun()
 
 
-# =========================
-# OPENCV IMAGE HELPERS
-# =========================
-
-def get_mime_type(path):
-    suffix = Path(path).suffix.lower()
-    if suffix in [".jpg", ".jpeg"]:
-        return "image/jpeg"
-    if suffix == ".png":
-        return "image/png"
-    return "application/octet-stream"
-
-
-def enhance_image_opencv(image_path, mode="balanced"):
-    image_path = Path(image_path)
-    img = cv2.imread(str(image_path))
-
-    if img is None:
-        return str(image_path), False, "Không đọc được ảnh bằng OpenCV."
-
-    try:
-        if mode == "fast":
-            processed = opencv_fast_enhance(img)
-        elif mode == "high_quality":
-            processed = opencv_high_quality_enhance(img)
-        else:
-            processed = opencv_balanced_enhance(img)
-
-        output_path = image_path.parent / f"opencv_{mode}_{image_path.name}"
-        if output_path.suffix.lower() not in [".png", ".jpg", ".jpeg"]:
-            output_path = output_path.with_suffix(".png")
-
-        saved = cv2.imwrite(str(output_path), processed)
-
-        if not saved:
-            return str(image_path), False, "Không lưu được ảnh đã xử lý."
-
-        return str(output_path), True, f"Đã xử lý ảnh bằng OpenCV. Chế độ: {mode}."
-
-    except Exception as e:
-        return str(image_path), False, f"Lỗi xử lý ảnh bằng OpenCV: {e}"
-
-
-def opencv_fast_enhance(img):
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-
-    # Tăng cường độ tương phản cục bộ vừa phải trên kênh độ sáng (L)
-    clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
-    l_clahe = clahe.apply(l)
-
-    # Làm nét dịu nhẹ (Unsharp Mask) trên kênh L để tránh làm nhiễu màu sắc
-    blur = cv2.GaussianBlur(l_clahe, (5, 5), 0)
-    l_sharpen = cv2.addWeighted(l_clahe, 1.3, blur, -0.3, 0)
-
-    enhanced = cv2.merge((l_sharpen, a, b))
-    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-
-def opencv_balanced_enhance(img):
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-
-    # Cân bằng độ tương phản kênh sáng (L)
-    clahe = cv2.createCLAHE(clipLimit=1.3, tileGridSize=(8, 8))
-    l_clahe = clahe.apply(l)
-
-    # Bộ lọc Bilateral để làm mịn các kết cấu nền (nhiễu hạt/đường lưới) nhưng giữ nguyên biên cạnh
-    l_smooth = cv2.bilateralFilter(l_clahe, d=5, sigmaColor=15, sigmaSpace=15)
-
-    # Làm nét mềm mại
-    blur = cv2.GaussianBlur(l_smooth, (0, 0), 0.6)
-    l_sharpen = cv2.addWeighted(l_smooth, 1.4, blur, -0.4, 0)
-
-    enhanced = cv2.merge((l_sharpen, a, b))
-    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-
-
-def opencv_high_quality_enhance(img):
-    """
-    ECG/document optimized filters: Giữ nét chính, triệt tiêu lưới sọc nền tần số cao.
-    """
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-
-    # Tăng tương phản thông minh
-    clahe = cv2.createCLAHE(clipLimit=1.4, tileGridSize=(8, 8))
-    l_clahe = clahe.apply(l)
-
-    # Tăng mạnh Bilateral Filter trên kênh L để làm mờ lưới ECG màu nhạt, chỉ giữ lại đường ECG đậm nét
-    l_smooth = cv2.bilateralFilter(l_clahe, d=7, sigmaColor=25, sigmaSpace=25)
-
-    # Làm nét unsharp mask
-    blur = cv2.GaussianBlur(l_smooth, (0, 0), 1.0)
-    l_sharpen = cv2.addWeighted(l_smooth, 1.5, blur, -0.5, 0)
-
-    enhanced = cv2.merge((l_sharpen, a, b))
-    return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+# OpenCV pipeline removed to keep only Gemini Vision / search content.
 
 
 # =========================
@@ -824,29 +726,7 @@ def ask_gemini(question, context_text, model_name, temp, max_tokens, api_key):
 # =========================
 
 st.title("📄 DocAnalyzer AI Pro")
-st.caption("Trò chuyện thông minh cùng tài liệu và hình ảnh bằng Gemini RAG & OpenCV Local")
-
-# 1. Image Enhancement Settings Expander
-with st.expander("⚙️ Thiết lập tăng cường hình ảnh OpenCV", expanded=True):
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        process_mode_label = st.radio(
-            "Chọn chế độ tăng nét OpenCV",
-            ["Nhanh (CLAHE + Sharp 2D)", "Cân bằng (Gray + Gaussian + Unsharp)", "Rõ nét cao (Bilateral Filter Edge)"],
-            horizontal=True,
-        )
-    with col_b:
-        enable_enhance = st.toggle(
-            "Kích hoạt OpenCV Local Enhance",
-            value=True,
-        )
-
-    mode_map = {
-        "Nhanh (CLAHE + Sharp 2D)": "fast",
-        "Cân bằng (Gray + Gaussian + Unsharp)": "balanced",
-        "Rõ nét cao (Bilateral Filter Edge)": "high_quality",
-    }
-    process_mode = mode_map[process_mode_label]
+st.caption("Trò chuyện thông minh cùng tài liệu và hình ảnh bằng Gemini RAG")
 
 
 # 2. File Uploader
@@ -881,27 +761,6 @@ if uploaded_files:
 
         if suffix in [".png", ".jpg", ".jpeg"]:
             image_paths.append(str(file_path))
-            original_path_str = str(file_path)
-
-            # Process with OpenCV immediately and store globally
-            cache_key = f"{original_path_str}_{process_mode if enable_enhance else 'none'}"
-            if cache_key not in st.session_state.processed_images:
-                if enable_enhance:
-                    with st.spinner(f"⚡ Đang tăng nét ảnh {uploaded_file.name} bằng OpenCV..."):
-                        p_path, ok, msg = enhance_image_opencv(file_path, mode=process_mode)
-                        st.session_state.processed_images[cache_key] = {
-                            "original_path": original_path_str,
-                            "processed_path": p_path,
-                            "ok": ok,
-                            "message": msg
-                        }
-                else:
-                    st.session_state.processed_images[cache_key] = {
-                        "original_path": original_path_str,
-                        "processed_path": original_path_str,
-                        "ok": True,
-                        "message": "Đang dùng ảnh gốc."
-                    }
         else:
             saved_paths.append(str(file_path))
 
@@ -931,37 +790,15 @@ if uploaded_files:
                     "Hệ thống đã tự động trích xuất các hình ảnh trong trang để bạn gửi trực tiếp cho Gemini Vision!"
                 )
 
-    # 3. Persistent Preview Interface
-    all_cached_keys = list(st.session_state.processed_images.keys())
-    active_keys = [k for k in all_cached_keys if k.endswith(process_mode if enable_enhance else "none")]
+    # 3. Preview Interface
     extracted_pdf_imgs = st.session_state.pdf_extracted_images
 
-    if active_keys or extracted_pdf_imgs:
-        with st.expander("🖼️ Khu vực kiểm duyệt & xem thử hình ảnh (Không mất khi chat)", expanded=True):
+    if image_paths or extracted_pdf_imgs:
+        with st.expander("🖼️ Khu vực xem thử hình ảnh (Không mất khi chat)", expanded=True):
             # Render standard uploaded images
-            for k in active_keys:
-                img_data = st.session_state.processed_images[k]
-                orig_path = img_data.get("original_path", k.rsplit("_", 1)[0])
-                proc_path = img_data["processed_path"]
-
-                st.markdown(f"**📸 Hình ảnh:** `{Path(orig_path).name}`")
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.image(orig_path, caption="Ảnh gốc chưa xử lý", use_container_width=True)
-                with col2:
-                    st.image(proc_path, caption=f"Ảnh sau xử lý (Chế độ: {process_mode_label if enable_enhance else 'Gốc'})", use_container_width=True)
-                    # Safe Download Button
-                    try:
-                        with open(proc_path, "rb") as f:
-                            st.download_button(
-                                label="⬇️ Tải ảnh đã xử lý",
-                                data=f,
-                                file_name=Path(proc_path).name,
-                                mime=get_mime_type(proc_path),
-                                key=f"dl_{hashlib.md5(proc_path.encode()).hexdigest()}"
-                            )
-                    except Exception:
-                        pass
+            for img_path in image_paths:
+                st.markdown(f"**📸 Hình ảnh:** `{Path(img_path).name}`")
+                st.image(img_path, caption="Ảnh gốc đã upload", use_container_width=True)
                 st.markdown("---")
 
             # Render extracted images from scanned PDFs
@@ -971,27 +808,7 @@ if uploaded_files:
                 for idx, ext_path in enumerate(extracted_pdf_imgs):
                     target_col = grid_cols[idx % len(grid_cols)]
                     with target_col:
-                        # Process extracted PDF images through OpenCV too
-                        pdf_cache_key = f"{ext_path}_{process_mode if enable_enhance else 'none'}"
-                        if pdf_cache_key not in st.session_state.processed_images:
-                            if enable_enhance:
-                                p_path, ok, _ = enhance_image_opencv(Path(ext_path), mode=process_mode)
-                                st.session_state.processed_images[pdf_cache_key] = {
-                                    "original_path": ext_path,
-                                    "processed_path": p_path,
-                                    "ok": ok,
-                                    "message": ""
-                                }
-                            else:
-                                st.session_state.processed_images[pdf_cache_key] = {
-                                    "original_path": ext_path,
-                                    "processed_path": ext_path,
-                                    "ok": True,
-                                    "message": ""
-                                }
-                        
-                        disp_img = st.session_state.processed_images[pdf_cache_key]["processed_path"]
-                        st.image(disp_img, caption=f"PDF Extracted - {Path(ext_path).name}", use_container_width=True)
+                        st.image(ext_path, caption=f"PDF Extracted - {Path(ext_path).name}", use_container_width=True)
 
 
 # =========================
@@ -1037,19 +854,11 @@ if question:
             file_path = save_uploaded_file(uploaded_file)
             suffix = Path(file_path).suffix.lower()
             if suffix in [".png", ".jpg", ".jpeg"]:
-                cache_key = f"{str(file_path)}_{process_mode if enable_enhance else 'none'}"
-                if cache_key in st.session_state.processed_images:
-                    active_query_images.append(st.session_state.processed_images[cache_key]["processed_path"])
-                else:
-                    active_query_images.append(str(file_path))
+                active_query_images.append(str(file_path))
 
     if st.session_state.pdf_extracted_images:
         for ext_path in st.session_state.pdf_extracted_images:
-            cache_key = f"{ext_path}_{process_mode if enable_enhance else 'none'}"
-            if cache_key in st.session_state.processed_images:
-                active_query_images.append(st.session_state.processed_images[cache_key]["processed_path"])
-            else:
-                active_query_images.append(ext_path)
+            active_query_images.append(ext_path)
 
     # Record User Message
     st.session_state.messages.append({
